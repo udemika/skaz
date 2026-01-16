@@ -16,7 +16,6 @@
             voice: []
         };
         
-        // Обновленный список зеркал
         var MIRRORS = [
             'http://online3.skaz.tv/',
             'http://online7.skaz.tv/',
@@ -82,8 +81,6 @@
                     active_source_name = a.source;
                     Lampa.Storage.set('skaz_last_balanser', active_source_name);
                     
-                    log('Selected source:', active_source_name);
-
                     var base = SETTINGS.current_mirror + 'lite/' + active_source_name;
                     current_source = _this.requestParams(base);
                     
@@ -96,7 +93,6 @@
                     if (filter_items[a.stype] && filter_items[a.stype][b.index]) {
                          var item = filter_items[a.stype][b.index];
                          if (item.url) {
-                             log('Selected filter item:', item.title);
                              current_source = item.url;
                              _this.find();
                          }
@@ -144,12 +140,8 @@
                 network.silent(url, function(json) {
                     if (json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
                     if (json.imdb_id) object.movie.imdb_id = json.imdb_id;
-                    log('IDs loaded:', json);
                     resolve();
-                }, function() {
-                    log('IDs load error');
-                    resolve();
-                });
+                }, resolve);
             });
         };
 
@@ -158,19 +150,14 @@
             var url = this.requestParams(SETTINGS.current_mirror + 'lite/events?life=true');
             url = this.account(url);
             
-            log('Loading balansers list:', url);
-
             network.timeout(10000);
             network.silent(url, function(json) {
                 if (json.online && json.online.length) {
-                    log('Balansers found:', json.online.length);
                     _this.buildSourceFilter(json.online);
                 } else {
-                    log('Balansers list empty or invalid, using default');
                     _this.buildSourceFilter(DEFAULT_BALANSERS);
                 }
             }, function() {
-                log('Balansers load error, using default');
                 _this.buildSourceFilter(DEFAULT_BALANSERS);
             });
         };
@@ -214,7 +201,6 @@
                 current_source = _this.requestParams(sources[active].url);
             }
             
-            log('Initial source selected:', current_source);
             this.find();
         };
 
@@ -229,7 +215,6 @@
             network.native(url, function(str) {
                 _this.parse(str);
             }, function() {
-                log('Network error requesting content');
                 _this.tryNextMirror();
             }, false, { dataType: 'text' });
         };
@@ -258,7 +243,6 @@
             try {
                 var json = JSON.parse(str);
                 if (json.accsdb || json.msg) {
-                    log('Access blocked by server:', json.msg);
                     return _this.tryNextMirror();
                 }
             } catch(e) {}
@@ -266,8 +250,6 @@
             var html = $(str);
             var content = html.find('.videos__item');
             
-            log('Content parsed, items count:', content.length);
-
             this.parseFilters(html);
             
             scroll.clear();
@@ -281,22 +263,9 @@
                         
                         if (data && data.url) {
                             if (data.method == 'play' || data.method == 'call') {
-                                data.url = _this.account(data.url);
-                                log('Playing media (signed):', data.url);
-                                Lampa.Player.play(data);
-                                
-                                var playlist = [];
-                                content.each(function(){
-                                    var item = $(this).data('json');
-                                    if(item.method == 'play' || item.method == 'call'){
-                                        item.url = _this.account(item.url); 
-                                        playlist.push(item);
-                                    }
-                                });
-                                Lampa.Player.playlist(playlist);
-                                
+                                // ЗАПУСКАЕМ ЧЕРЕЗ РЕЗОЛВЕР
+                                _this.play(data); 
                             } else if (data.method == 'link') {
-                                log('Following link:', data.url);
                                 current_source = data.url;
                                 _this.find();
                             }
@@ -308,6 +277,46 @@
                  _this.showMessage('Пусто. Попробуйте другой источник или озвучку.');
             }
             Lampa.Controller.enable('content');
+        };
+        
+        // НОВАЯ ФУНКЦИЯ ДЛЯ ЗАГРУЗКИ РЕАЛЬНОЙ ССЫЛКИ
+        this.play = function(data) {
+            var _this = this;
+            Lampa.Loading.start(function() {
+                Lampa.Loading.stop();
+            });
+
+            var url = _this.account(data.url);
+            log('Resolving video link:', url);
+
+            network.silent(url, function(json) {
+                Lampa.Loading.stop();
+                
+                if (json && json.url) {
+                    log('Video resolved:', json.url);
+                    
+                    var video_data = {
+                        title: data.title || json.title,
+                        url: _this.account(json.url),
+                        quality: json.quality || {},
+                        subtitles: json.subtitles || [],
+                        timeline: json.timeline || {}
+                    };
+                    
+                    Lampa.Player.play(video_data);
+                    
+                    // Попытка собрать плейлист (упрощенная)
+                    var playlist = [];
+                    playlist.push(video_data); 
+                    Lampa.Player.playlist(playlist);
+                    
+                } else {
+                    Lampa.Noty.show('Не удалось получить ссылку на видео');
+                }
+            }, function() {
+                Lampa.Loading.stop();
+                Lampa.Noty.show('Ошибка запроса видео');
+            });
         };
 
         this.parseFilters = function(html) {
@@ -349,7 +358,6 @@
             }
             
             if (filters_found) {
-                log('Filters found (seasons/voices)');
                 this.updateFilter();
             }
         };
