@@ -200,25 +200,19 @@
             
             var is_json = false;
             try {
-                // Сначала пробуем парсить как JSON
                 var json = JSON.parse(str);
                 is_json = true;
-                
-                // Если это JSON и там ошибка авторизации - просто пишем что пусто
                 if (json.accsdb || json.msg) {
                     return _this.empty('Источник недоступен (требует подписки). Выберите другой.');
                 }
             } catch(e) {
-                // Если не парсится как JSON - значит это HTML, все ок
                 is_json = false;
             }
 
-            // Если это был JSON (но без явной ошибки), то искать там HTML-элементы бесполезно
             if (is_json) {
                  return _this.empty('Пустой ответ сервера');
             }
 
-            // Парсим HTML
             var content = $(str).find('.videos__item');
             
             if (content.length) {
@@ -227,9 +221,36 @@
                     
                     element.on('hover:enter', function() {
                         var data = element.data('json');
+                        
                         if (data && data.url) {
                             if (data.method == 'play' || data.method == 'call') {
-                                Lampa.Player.play(data);
+                                // ВАЖНО: Формируем правильный объект для системного плеера
+                                var media = {
+                                    url: _this.account(data.url),
+                                    title: (object.movie.title || object.movie.name) + ' - ' + (element.text().trim()),
+                                    subtitles: data.subtitles || [],
+                                    quality: data.quality || {},
+                                    // Указание, что это онлайн поток может помочь плееру
+                                    is_stream: true 
+                                };
+
+                                Lampa.Player.play(media);
+                                
+                                // Добавляем в плейлист, чтобы работало переключение серий
+                                var playlist = [];
+                                content.each(function(){
+                                    var item = $(this).data('json');
+                                    if(item.method == 'play' || item.method == 'call'){
+                                        playlist.push({
+                                            url: _this.account(item.url),
+                                            title: (object.movie.title || object.movie.name) + ' - ' + $(this).text().trim(),
+                                            subtitles: item.subtitles || [],
+                                            timeline: item.timeline || {}
+                                        });
+                                    }
+                                });
+                                Lampa.Player.playlist(playlist);
+                                
                             } else if (data.method == 'link') {
                                 current_source = data.url;
                                 _this.find();
