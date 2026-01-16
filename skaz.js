@@ -11,7 +11,6 @@
         var current_source = '';
         var active_source_name = '';
         
-        // Переменные для хранения фильтров (сезоны/озвучки)
         var filter_items = {
             season: [],
             voice: []
@@ -49,7 +48,14 @@
             { name: 'Kodik', balanser: 'kodik' }
         ];
 
+        // ЛОГИРОВАНИЕ
+        function log(msg, data) {
+            console.log('[SkazLite]', msg, data || '');
+        }
+
         this.account = function(url) {
+            // Иногда для определенных балансеров не нужно добавлять подпись, если это прямая ссылка
+            // Но пока оставляем как есть для унификации
             if (url.indexOf('account_email=') == -1) url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(SETTINGS.email));
             if (url.indexOf('uid=') == -1) url = Lampa.Utils.addUrlComponent(url, 'uid=' + encodeURIComponent(SETTINGS.uid));
             if (url.indexOf('lampac_unic_id=') == -1) url = Lampa.Utils.addUrlComponent(url, 'lampac_unic_id=' + encodeURIComponent(unic_id));
@@ -71,28 +77,26 @@
         this.create = function() {
             var _this = this;
 
-            // Обработка выбора в фильтре
             filter.onSelect = function(type, a, b) {
                 if (type == 'sort') {
-                    // Смена источника
                     active_source_name = a.source;
                     Lampa.Storage.set('skaz_last_balanser', active_source_name);
                     
+                    log('Selected source:', active_source_name);
+
                     var base = SETTINGS.current_mirror + 'lite/' + active_source_name;
                     current_source = _this.requestParams(base);
                     
-                    // Сбрасываем фильтры сезонов/озвучек при смене источника
                     filter_items.season = [];
                     filter_items.voice = [];
                     _this.updateFilter(); 
                     
                     _this.find();
                 } else if (type == 'filter') {
-                    // Смена сезона или озвучки
-                    // Обычно это работает через перезагрузку с новым URL
                     if (filter_items[a.stype] && filter_items[a.stype][b.index]) {
                          var item = filter_items[a.stype][b.index];
                          if (item.url) {
+                             log('Selected filter item:', item.title);
                              current_source = item.url;
                              _this.find();
                          }
@@ -105,15 +109,14 @@
                 Lampa.Activity.backward();
             };
 
-            // Начальная отрисовка фильтра
             filter.render().find('.filter--sort span').text('Источник');
-            
-            // Настройка списка файлов
             scroll.body().addClass('torrent-list');
             files.appendFiles(scroll.render());
             files.appendHead(filter.render());
             
+            // Выбираем случайное зеркало при старте
             SETTINGS.current_mirror = MIRRORS[Math.floor(Math.random() * MIRRORS.length)];
+            log('Start on mirror:', SETTINGS.current_mirror);
             
             this.start();
 
@@ -127,8 +130,6 @@
         this.start = function() {
             var _this = this;
             Lampa.Controller.enable('content');
-            
-            // Лоадер показываем ТОЛЬКО внутри скролла, чтобы фильтр остался доступен
             scroll.body().append(Lampa.Template.get('lampac_content_loading'));
 
             this.getIds().then(function() {
@@ -144,8 +145,12 @@
                 network.silent(url, function(json) {
                     if (json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
                     if (json.imdb_id) object.movie.imdb_id = json.imdb_id;
+                    log('IDs loaded:', json);
                     resolve();
-                }, resolve);
+                }, function() {
+                    log('IDs load error');
+                    resolve();
+                });
             });
         };
 
@@ -153,15 +158,20 @@
             var _this = this;
             var url = this.requestParams(SETTINGS.current_mirror + 'lite/events?life=true');
             url = this.account(url);
+            
+            log('Loading balansers list:', url);
 
             network.timeout(10000);
             network.silent(url, function(json) {
                 if (json.online && json.online.length) {
+                    log('Balansers found:', json.online.length);
                     _this.buildSourceFilter(json.online);
                 } else {
+                    log('Balansers list empty or invalid, using default');
                     _this.buildSourceFilter(DEFAULT_BALANSERS);
                 }
             }, function() {
+                log('Balansers load error, using default');
                 _this.buildSourceFilter(DEFAULT_BALANSERS);
             });
         };
@@ -194,7 +204,6 @@
 
             source_items.forEach(f => f.selected = (f.source === active));
             
-            // Обновляем фильтр источников
             filter.set('sort', source_items);
             filter.chosen('sort', [sources[active].name]);
             
@@ -206,41 +215,63 @@
                 current_source = _this.requestParams(sources[active].url);
             }
             
+            log('Initial source selected:', current_source);
             this.find();
         };
 
         this.find = function() {
             var _this = this;
-            
-            // Очищаем только контент, фильтры оставляем
             scroll.clear(); 
             scroll.body().append(Lampa.Template.get('lampac_content_loading'));
 
             var url = this.account(current_source);
+            log('Requesting content:', url);
 
             network.native(url, function(str) {
                 _this.parse(str);
             }, function() {
-                _this.showMessage('Ошибка сети. Попробуйте другой источник.');
+                log('Network error requesting content');
+                _this.tryNextMirror();
             }, false, { dataType: 'text' });
+        };
+        
+        // Попытка сменить зеркало при ошибке
+        this.tryNextMirror = function() {
+            var current_idx = MIRRORS.indexOf(SETTINGS.current_mirror);
+            var next_idx = (current_idx + 1) % MIRRORS.length;
+            
+            if (next_idx === 0) { // Прошли круг
+                this.showMessage('Ошибка сети. Все зеркала недоступны.');
+                return;
+            }
+            
+            SETTINGS.current_mirror = MIRRORS[next_idx];
+            log('Switching mirror to:', SETTINGS.current_mirror);
+            
+            // Перестраиваем URL с новым зеркалом
+            var base = SETTINGS.current_mirror + 'lite/' + active_source_name;
+            current_source = this.requestParams(base);
+            
+            this.find();
         };
 
         this.parse = function(str) {
             var _this = this;
             
-            // Проверка на ошибки JSON (авторизация и т.д.)
             try {
                 var json = JSON.parse(str);
                 if (json.accsdb || json.msg) {
-                    return _this.showMessage('Источник недоступен (нужна подписка).<br>Нажмите "Источник" сверху и выберите другой (например VideoCDN).');
+                    log('Access blocked by server:', json.msg);
+                    // Пробуем другое зеркало, возможно там не забанено
+                    return _this.tryNextMirror();
                 }
             } catch(e) {}
 
-            // Парсинг HTML
             var html = $(str);
             var content = html.find('.videos__item');
             
-            // 1. ПАРСИНГ ФИЛЬТРОВ (Сезоны и Озвучки) для "Фильтр"
+            log('Content parsed, items count:', content.length);
+
             this.parseFilters(html);
             
             scroll.clear();
@@ -254,10 +285,9 @@
                         
                         if (data && data.url) {
                             if (data.method == 'play' || data.method == 'call') {
-                                // Запуск плеера
+                                log('Playing media:', data.url);
                                 Lampa.Player.play(data);
                                 
-                                // Создаем плейлист
                                 var playlist = [];
                                 content.each(function(){
                                     var item = $(this).data('json');
@@ -268,7 +298,7 @@
                                 Lampa.Player.playlist(playlist);
                                 
                             } else if (data.method == 'link') {
-                                // Переход в папку (сезон/серия)
+                                log('Following link:', data.url);
                                 current_source = data.url;
                                 _this.find();
                             }
@@ -282,18 +312,15 @@
             Lampa.Controller.enable('content');
         };
 
-        // Логика извлечения фильтров из HTML (как на скриншотах)
         this.parseFilters = function(html) {
             var _this = this;
             var filters_found = false;
             
-            // Ищем сезоны
             var seasons = html.find('.videos__season, .selector[data-type="season"]');
             if (seasons.length) {
                 filter_items.season = [];
                 seasons.each(function() {
                     var el = $(this);
-                    // Обычно данные лежат в data-json или просто в ссылке
                     var data = el.data('json'); 
                     if (data && data.url) {
                         filter_items.season.push({
@@ -306,7 +333,6 @@
                 filters_found = true;
             }
             
-            // Ищем озвучки
             var voices = html.find('.videos__button, .selector[data-type="voice"]');
             if (voices.length) {
                 filter_items.voice = [];
@@ -325,11 +351,11 @@
             }
             
             if (filters_found) {
+                log('Filters found (seasons/voices)');
                 this.updateFilter();
             }
         };
 
-        // Обновление кнопки "Фильтр"
         this.updateFilter = function() {
             var items = [];
             
@@ -352,13 +378,12 @@
             }
             
             filter.set('filter', items);
-            // Если фильтров нет, кнопка исчезнет сама или будет пустой
         };
 
         this.showMessage = function(msg) {
             scroll.clear();
             var html = Lampa.Template.get('lampac_does_not_answer', {});
-            html.find('.online-empty__title').html(msg); // Используем html() для поддержки <br>
+            html.find('.online-empty__title').html(msg);
             html.find('.online-empty__buttons').remove();
             scroll.append(html);
         };
