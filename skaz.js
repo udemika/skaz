@@ -18,7 +18,7 @@
         
         var MIRRORS = [
             'http://online3.skaz.tv/',
-            'http://online4.skaz.tv/',
+            'http://online7.skaz.tv/',
             'http://online5.skaz.tv/'
         ];
 
