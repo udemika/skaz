@@ -16,10 +16,11 @@
             voice: []
         };
         
+        // Обновленный список зеркал
         var MIRRORS = [
             'http://online3.skaz.tv/',
             'http://online7.skaz.tv/',
-            'http://onlinecf3.skaz.tv/,'
+            'http://onlinecf3.skaz.tv/',
             'http://online5.skaz.tv/'
         ];
 
@@ -280,19 +281,14 @@
                         
                         if (data && data.url) {
                             if (data.method == 'play' || data.method == 'call') {
-                                
-                                // --- ИСПРАВЛЕНИЕ: Добавляем подпись к URL видео ---
                                 data.url = _this.account(data.url);
-                                
                                 log('Playing media (signed):', data.url);
-                                
                                 Lampa.Player.play(data);
                                 
                                 var playlist = [];
                                 content.each(function(){
                                     var item = $(this).data('json');
                                     if(item.method == 'play' || item.method == 'call'){
-                                        // И к каждому элементу плейлиста тоже
                                         item.url = _this.account(item.url); 
                                         playlist.push(item);
                                     }
