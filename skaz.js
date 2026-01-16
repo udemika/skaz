@@ -30,9 +30,9 @@
         };
 
         var DEFAULT_BALANSERS = [
-            { name: 'VideoCDN', balanser: 'videocdn' }, // Обычно бесплатный
-            { name: 'Alloha', balanser: 'alloha' },     // Обычно бесплатный
-            { name: 'Collaps', balanser: 'collaps' },   // Обычно бесплатный
+            { name: 'VideoCDN', balanser: 'videocdn' },
+            { name: 'Alloha', balanser: 'alloha' },
+            { name: 'Collaps', balanser: 'collaps' },
             { name: 'RHS Premium', balanser: 'rhsprem' },
             { name: 'Rezka', balanser: 'rezka' },
             { name: 'Filmix', balanser: 'filmix' },
@@ -198,11 +198,27 @@
             var _this = this;
             scroll.clear();
             
-            // --- УБРАНА ПРОВЕРКА НА ОШИБКИ АВТОРИЗАЦИИ (accsdb) ---
-            // Мы просто игнорируем любые сообщения сервера в JSON, кроме контента.
-            // Если там есть "accsdb: true", мы это пропустим и пойдем искать видео (которых не будет).
-            // В итоге покажем "Контент не найден" вместо "Купите подписку".
-            
+            var is_json = false;
+            try {
+                // Сначала пробуем парсить как JSON
+                var json = JSON.parse(str);
+                is_json = true;
+                
+                // Если это JSON и там ошибка авторизации - просто пишем что пусто
+                if (json.accsdb || json.msg) {
+                    return _this.empty('Источник недоступен (требует подписки). Выберите другой.');
+                }
+            } catch(e) {
+                // Если не парсится как JSON - значит это HTML, все ок
+                is_json = false;
+            }
+
+            // Если это был JSON (но без явной ошибки), то искать там HTML-элементы бесполезно
+            if (is_json) {
+                 return _this.empty('Пустой ответ сервера');
+            }
+
+            // Парсим HTML
             var content = $(str).find('.videos__item');
             
             if (content.length) {
@@ -223,8 +239,7 @@
                     scroll.append(element);
                 });
             } else {
-                 // Тут мы не проверяем json.msg, чтобы не показывать текст ошибки от сервера
-                 _this.empty('Пусто. Попробуйте другой источник.');
+                 _this.empty('Контент не найден.');
             }
             Lampa.Controller.enable('content');
         };
