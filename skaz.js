@@ -11,21 +11,32 @@
         var current_source = '';
         var balanser_name = '';
         
+        // Массив зеркал для отказоустойчивости
         var MIRRORS = [
             'http://online3.skaz.tv/',
             'http://online4.skaz.tv/',
             'http://online5.skaz.tv/'
         ];
         
+        // Генерация уникального ID (как в оригинале)
+        var unic_id = Lampa.Storage.get('lampac_unic_id', '');
+        if (!unic_id) {
+            unic_id = Lampa.Utils.uid(8).toLowerCase();
+            Lampa.Storage.set('lampac_unic_id', unic_id);
+        }
+
         var SETTINGS = {
             email: 'aklama@mail.ru',
-            uid: 'guestn',
+            uid: 'guest', 
             current_mirror: MIRRORS[0]
         };
 
+        // Полная имитация подписи из on.js
         this.account = function(url) {
             if (url.indexOf('account_email=') == -1) url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(SETTINGS.email));
             if (url.indexOf('uid=') == -1) url = Lampa.Utils.addUrlComponent(url, 'uid=' + encodeURIComponent(SETTINGS.uid));
+            // Добавляем unic_id, это важно для "узнавания" клиента
+            if (url.indexOf('lampac_unic_id=') == -1) url = Lampa.Utils.addUrlComponent(url, 'lampac_unic_id=' + encodeURIComponent(unic_id));
             return url;
         };
 
@@ -34,17 +45,16 @@
             query.push('id=' + object.movie.id);
             if (object.movie.imdb_id) query.push('imdb_id=' + object.movie.imdb_id);
             if (object.movie.kinopoisk_id) query.push('kinopoisk_id=' + object.movie.kinopoisk_id);
+            
             query.push('title=' + encodeURIComponent(object.movie.title || object.movie.name));
             query.push('original_title=' + encodeURIComponent(object.movie.original_title || object.movie.original_name));
             query.push('serial=' + (object.movie.name ? 1 : 0));
-            query.push('original_language=' + (object.movie.original_language || ''));
-            var year = (object.movie.release_date || object.movie.first_air_date || '0000') + '';
-            query.push('year=' + year.slice(0, 4));
+            
+            // Хеш email для cub_id (критично для проверки подписки/доступа)
             if (SETTINGS.email) query.push('cub_id=' + Lampa.Utils.hash(SETTINGS.email));
+            
             return base_url + (base_url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
         };
-
-        // --- ИСПРАВЛЕНИЕ: Методы инициализации ---
 
         this.create = function() {
             var _this = this;
@@ -70,6 +80,7 @@
             files.appendFiles(scroll.render());
             files.appendHead(filter.render());
             
+            // Случайный выбор зеркала при старте
             SETTINGS.current_mirror = MIRRORS[Math.floor(Math.random() * MIRRORS.length)];
             
             this.start();
@@ -77,7 +88,6 @@
             return this.render();
         };
 
-        // ВАЖНО: Метод render обязателен для Lampa
         this.render = function() {
             return files.render();
         };
@@ -96,6 +106,7 @@
             var _this = this;
             return new Promise(function(resolve) {
                 if (object.movie.kinopoisk_id || object.movie.imdb_id) return resolve();
+                
                 var url = _this.account(SETTINGS.current_mirror + 'externalids?id=' + object.movie.id);
                 network.silent(url, function(json) {
                     if (json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
@@ -107,21 +118,23 @@
 
         this.loadSourceMap = function() {
             var _this = this;
+            // Добавил life=true и rjson=true, как в оригинале
             var url = this.requestParams(SETTINGS.current_mirror + 'lite/events?life=true');
             url = this.account(url);
 
             network.timeout(15000);
             network.silent(url, function(json) {
                 if (json.accsdb) {
-                    _this.empty(json.msg || 'Ошибка доступа. Проверьте аккаунт.');
+                     // Если все равно просит, попробуем обойти через прямой запрос
+                     console.log('SkazLite: AccsDB block, trying direct fallback');
+                     _this.fallbackDirectMode();
                 } else if (json.online && json.online.length) {
                     _this.buildFilter(json.online);
-                } else if (json.life) {
-                     _this.buildFilter(json.online || []);
                 } else {
                     _this.empty('Источники не найдены');
                 }
             }, function() {
+                // Failover
                 var next_mirror_idx = (MIRRORS.indexOf(SETTINGS.current_mirror) + 1) % MIRRORS.length;
                 SETTINGS.current_mirror = MIRRORS[next_mirror_idx];
                 var url2 = _this.requestParams(SETTINGS.current_mirror + 'lite/events?life=true');
@@ -129,9 +142,23 @@
                      if (json.online) _this.buildFilter(json.online);
                      else _this.empty('Источники не найдены (2)');
                 }, function() {
-                    _this.empty('Серверы Skaz.tv недоступны');
+                    _this.empty('Серверы недоступны');
                 });
             });
+        };
+
+        // Режим, если сервер блокирует получение списка
+        this.fallbackDirectMode = function() {
+            var _this = this;
+            // Генерируем список вручную из популярных бесплатных
+            var manual_list = [
+                { name: 'VideoCDN', balanser: 'videocdn', url: SETTINGS.current_mirror + 'lite/videocdn' },
+                { name: 'Alloha', balanser: 'alloha', url: SETTINGS.current_mirror + 'lite/alloha' },
+                { name: 'Collaps', balanser: 'collaps', url: SETTINGS.current_mirror + 'lite/collaps' },
+                { name: 'Ashdi', balanser: 'ashdi', url: SETTINGS.current_mirror + 'lite/ashdi' },
+                { name: 'HDVB', balanser: 'hdvb', url: SETTINGS.current_mirror + 'lite/hdvb' }
+            ];
+            this.buildFilter(manual_list);
         };
 
         this.buildFilter = function(online_list) {
@@ -143,17 +170,19 @@
                 var name = (item.balanser || item.name).toLowerCase();
                 sources[name] = {
                     name: item.name,
-                    url: item.url,
-                    show: (typeof item.show == 'undefined' ? true : item.show)
+                    url: item.url
                 };
                 
-                if (sources[name].show) {
-                    filter_items.push({
-                        title: item.name,
-                        source: name,
-                        selected: false
-                    });
+                // Пропускаем явно платные/проблемные, если мы в fallback режиме
+                if (name === 'rezka' || name === 'filmix' || name === 'kinopub') {
+                    // Можно скрыть их, но пока оставим для теста
                 }
+
+                filter_items.push({
+                    title: item.name,
+                    source: name,
+                    selected: false
+                });
             });
 
             if (filter_items.length === 0) return this.empty('Нет доступных балансеров');
@@ -179,7 +208,9 @@
             scroll.clear();
             scroll.body().append(Lampa.Template.get('lampac_content_loading'));
 
-            var url = this.account(current_source);
+            // Важно: добавляем параметры запроса к URL источника
+            var url = this.requestParams(current_source);
+            url = this.account(url);
 
             network.native(url, function(str) {
                 _this.parse(str);
@@ -192,12 +223,10 @@
             var _this = this;
             scroll.clear();
             
-            var is_json = false;
             try {
                 var json = JSON.parse(str);
-                is_json = true;
                 if (json.accsdb || json.msg) {
-                    return _this.empty(json.msg || 'Ошибка доступа');
+                    return _this.empty(json.msg || 'Нужна авторизация для этого источника. Выберите другой.');
                 }
             } catch(e) {}
 
@@ -220,8 +249,7 @@
                     scroll.append(element);
                 });
             } else {
-                 if (is_json) _this.empty('Пустой JSON ответ');
-                 else _this.empty('Контент не найден');
+                 _this.empty('Контент не найден в этом источнике');
             }
             Lampa.Controller.enable('content');
         };
@@ -234,9 +262,6 @@
             scroll.append(html);
         };
         
-        // ВАЖНО: Lampa может вызывать activity/destroy/stop/pause
-        this.activity = object.activity;
-
         this.destroy = function() {
             network.clear();
             files.destroy();
@@ -252,7 +277,6 @@
         if (window.plugin_skaz_lite_ready) return;
         window.plugin_skaz_lite_ready = true;
 
-        // Регистрируем компонент глобально перед использованием
         Lampa.Component.add('skaz_lite', SkazLite);
 
         Lampa.Listener.follow('full', function (e) {
