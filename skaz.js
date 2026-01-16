@@ -17,7 +17,6 @@
             'http://online5.skaz.tv/'
         ];
 
-        // Генерация unic_id
         var unic_id = Lampa.Storage.get('lampac_unic_id', '');
         if (!unic_id) {
             unic_id = Lampa.Utils.uid(8).toLowerCase();
@@ -30,13 +29,11 @@
             current_mirror: MIRRORS[0]
         };
 
-        // --- СПИСОК БАЛАНСЕРОВ ПО УМОЛЧАНИЮ ---
-        // Если сервер не вернет список, используем этот
         var DEFAULT_BALANSERS = [
-            { name: 'VideoCDN', balanser: 'videocdn' },
-            { name: 'Alloha', balanser: 'alloha' },
-            { name: 'Collaps', balanser: 'collaps' },
-            { name: 'RHS Premium', balanser: 'rhsprem' }, // Тот самый из вашего примера
+            { name: 'VideoCDN', balanser: 'videocdn' }, // Обычно бесплатный
+            { name: 'Alloha', balanser: 'alloha' },     // Обычно бесплатный
+            { name: 'Collaps', balanser: 'collaps' },   // Обычно бесплатный
+            { name: 'RHS Premium', balanser: 'rhsprem' },
             { name: 'Rezka', balanser: 'rezka' },
             { name: 'Filmix', balanser: 'filmix' },
             { name: 'Ashdi', balanser: 'ashdi' },
@@ -55,20 +52,13 @@
 
         this.requestParams = function(base_url) {
             var query = [];
-            
-            // Основные ID
             query.push('id=' + object.movie.id);
             if (object.movie.imdb_id) query.push('imdb_id=' + object.movie.imdb_id);
             if (object.movie.kinopoisk_id) query.push('kinopoisk_id=' + object.movie.kinopoisk_id);
-            
-            // Названия (Обязательно!)
             query.push('title=' + encodeURIComponent(object.movie.title || object.movie.name));
             query.push('original_title=' + encodeURIComponent(object.movie.original_title || object.movie.original_name));
-            
-            // Дополнительно
             query.push('serial=' + (object.movie.name ? 1 : 0));
             query.push('cub_id=' + Lampa.Utils.hash(SETTINGS.email));
-            
             return base_url + (base_url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
         };
 
@@ -79,12 +69,8 @@
                 if (type == 'sort') {
                     balanser_name = a.source;
                     Lampa.Storage.set('skaz_last_balanser', balanser_name);
-                    
-                    // Формируем URL для выбранного балансера
-                    // Пример: http://online3.skaz.tv/lite/rhsprem?title=...
                     var base = SETTINGS.current_mirror + 'lite/' + balanser_name;
                     current_source = _this.requestParams(base);
-                    
                     _this.find();
                 }
             };
@@ -99,7 +85,6 @@
             files.appendFiles(scroll.render());
             files.appendHead(filter.render());
             
-            // Случайный выбор зеркала
             SETTINGS.current_mirror = MIRRORS[Math.floor(Math.random() * MIRRORS.length)];
             
             this.start();
@@ -125,7 +110,6 @@
             var _this = this;
             return new Promise(function(resolve) {
                 if (object.movie.kinopoisk_id || object.movie.imdb_id) return resolve();
-                
                 var url = _this.account(SETTINGS.current_mirror + 'externalids?id=' + object.movie.id);
                 network.silent(url, function(json) {
                     if (json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
@@ -142,18 +126,12 @@
 
             network.timeout(10000);
             network.silent(url, function(json) {
-                // Если сервер вернул список - используем его
                 if (json.online && json.online.length) {
                     _this.buildFilter(json.online);
-                } 
-                // Если нет - используем список по умолчанию (Fallback)
-                else {
-                    console.log('SkazLite: Сервер не вернул список, используем дефолтный');
+                } else {
                     _this.buildFilter(DEFAULT_BALANSERS);
                 }
             }, function() {
-                // Ошибка сети - тоже используем дефолтный список
-                console.log('SkazLite: Ошибка сети, используем дефолтный список');
                 _this.buildFilter(DEFAULT_BALANSERS);
             });
         };
@@ -165,11 +143,10 @@
             
             online_list.forEach(function(item) {
                 var name = (item.balanser || item.name || '').toLowerCase();
-                if (!name) return; // Пропуск битых
+                if (!name) return;
                 
                 sources[name] = {
                     name: item.name || name,
-                    // Если URL нет (в дефолтном списке), формируем его сами
                     url: item.url || (SETTINGS.current_mirror + 'lite/' + name)
                 };
                 
@@ -192,8 +169,6 @@
             
             balanser_name = active;
             
-            // Формируем финальный URL для запроса
-            // Если URL был готовый (с сервера) - берем его, если нет - строим сами с параметрами
             if (sources[active].url.indexOf('?') > -1) {
                 current_source = sources[active].url;
             } else {
@@ -223,16 +198,11 @@
             var _this = this;
             scroll.clear();
             
-            var is_json = false;
-            try {
-                var json = JSON.parse(str);
-                is_json = true;
-                // Игнорируем ошибку accsdb, если это возможно, или выводим сообщение
-                if (json.accsdb || json.msg) {
-                    return _this.empty(json.msg || 'Источник требует авторизации. Попробуйте другой.');
-                }
-            } catch(e) {}
-
+            // --- УБРАНА ПРОВЕРКА НА ОШИБКИ АВТОРИЗАЦИИ (accsdb) ---
+            // Мы просто игнорируем любые сообщения сервера в JSON, кроме контента.
+            // Если там есть "accsdb: true", мы это пропустим и пойдем искать видео (которых не будет).
+            // В итоге покажем "Контент не найден" вместо "Купите подписку".
+            
             var content = $(str).find('.videos__item');
             
             if (content.length) {
@@ -253,8 +223,8 @@
                     scroll.append(element);
                 });
             } else {
-                 if (is_json) _this.empty('Пустой ответ от источника');
-                 else _this.empty('Контент не найден');
+                 // Тут мы не проверяем json.msg, чтобы не показывать текст ошибки от сервера
+                 _this.empty('Пусто. Попробуйте другой источник.');
             }
             Lampa.Controller.enable('content');
         };
