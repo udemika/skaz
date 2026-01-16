@@ -55,14 +55,10 @@
 
         this.account = function(url) {
             if (!url) return url;
-            
-            // ВАЖНОЕ ИСПРАВЛЕНИЕ:
-            // Если ссылка на mp4 или m3u8 — НЕ добавляем параметры, чтобы не ломать CDN
+            // НЕ добавляем параметры к прямым ссылкам на файлы, это ломает Alloha и CDN
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) {
                 return url;
             }
-
-            // Добавляем параметры только для ссылок API (Skaz.tv)
             if (url.indexOf('account_email=') == -1) url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(SETTINGS.email));
             if (url.indexOf('uid=') == -1) url = Lampa.Utils.addUrlComponent(url, 'uid=' + encodeURIComponent(SETTINGS.uid));
             if (url.indexOf('lampac_unic_id=') == -1) url = Lampa.Utils.addUrlComponent(url, 'lampac_unic_id=' + encodeURIComponent(unic_id));
@@ -223,7 +219,10 @@
             network.native(url, function(str) {
                 _this.parse(str);
             }, function() {
-                _this.tryNextMirror();
+                // Добавляем задержку перед сменой зеркала, чтобы не банили
+                setTimeout(function(){
+                    _this.tryNextMirror();
+                }, 1000);
             }, false, { dataType: 'text' });
         };
         
@@ -232,7 +231,7 @@
             var next_idx = (current_idx + 1) % MIRRORS.length;
             
             if (next_idx === 0) { 
-                this.showMessage('Ошибка сети. Все зеркала недоступны.');
+                this.showMessage('Ошибка сети. Все зеркала недоступны.<br>Попробуйте перезагрузить плагин или приложение.');
                 return;
             }
             
@@ -250,6 +249,7 @@
             
             try {
                 var json = JSON.parse(str);
+                // Ошибка 503 может прийти и в JSON как msg
                 if (json.accsdb || json.msg) {
                     return _this.tryNextMirror();
                 }
@@ -288,9 +288,8 @@
         
         this.play = function(data) {
             var _this = this;
-            var url = _this.account(data.url); // Здесь теперь ПРАВИЛЬНАЯ обработка URL
+            var url = _this.account(data.url);
             
-            // Если это уже видеофайл -> играем сразу
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) {
                 log('Playing direct video file:', url);
                 data.url = url; 
@@ -299,7 +298,6 @@
                 return;
             }
 
-            // Если это API -> резолвим
             Lampa.Loading.start(function() {
                 Lampa.Loading.stop();
             });
@@ -310,7 +308,6 @@
                 Lampa.Loading.stop();
                 
                 if (json && json.url) {
-                    // Резолвер тоже может вернуть ссылку, которую надо проверить на наличие параметров
                     var clean_video_url = _this.account(json.url); 
                     log('Video resolved from API:', clean_video_url);
                     
