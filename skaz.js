@@ -11,47 +11,63 @@
         var current_source = '';
         var balanser_name = '';
         
-        // Массив зеркал для отказоустойчивости
         var MIRRORS = [
             'http://online3.skaz.tv/',
             'http://online4.skaz.tv/',
             'http://online5.skaz.tv/'
         ];
-        
-        // Генерация уникального ID (как в оригинале)
+
+        // Генерация unic_id
         var unic_id = Lampa.Storage.get('lampac_unic_id', '');
         if (!unic_id) {
             unic_id = Lampa.Utils.uid(8).toLowerCase();
             Lampa.Storage.set('lampac_unic_id', unic_id);
         }
-
+        
         var SETTINGS = {
             email: 'aklama@mail.ru',
-            uid: 'guest', 
+            uid: 'guest',
             current_mirror: MIRRORS[0]
         };
 
-        // Полная имитация подписи из on.js
+        // --- СПИСОК БАЛАНСЕРОВ ПО УМОЛЧАНИЮ ---
+        // Если сервер не вернет список, используем этот
+        var DEFAULT_BALANSERS = [
+            { name: 'VideoCDN', balanser: 'videocdn' },
+            { name: 'Alloha', balanser: 'alloha' },
+            { name: 'Collaps', balanser: 'collaps' },
+            { name: 'RHS Premium', balanser: 'rhsprem' }, // Тот самый из вашего примера
+            { name: 'Rezka', balanser: 'rezka' },
+            { name: 'Filmix', balanser: 'filmix' },
+            { name: 'Ashdi', balanser: 'ashdi' },
+            { name: 'Kinogo', balanser: 'kinogo' },
+            { name: 'Zetflix', balanser: 'zetflix' },
+            { name: 'HDVB', balanser: 'hdvb' },
+            { name: 'Kodik', balanser: 'kodik' }
+        ];
+
         this.account = function(url) {
             if (url.indexOf('account_email=') == -1) url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(SETTINGS.email));
             if (url.indexOf('uid=') == -1) url = Lampa.Utils.addUrlComponent(url, 'uid=' + encodeURIComponent(SETTINGS.uid));
-            // Добавляем unic_id, это важно для "узнавания" клиента
             if (url.indexOf('lampac_unic_id=') == -1) url = Lampa.Utils.addUrlComponent(url, 'lampac_unic_id=' + encodeURIComponent(unic_id));
             return url;
         };
 
         this.requestParams = function(base_url) {
             var query = [];
+            
+            // Основные ID
             query.push('id=' + object.movie.id);
             if (object.movie.imdb_id) query.push('imdb_id=' + object.movie.imdb_id);
             if (object.movie.kinopoisk_id) query.push('kinopoisk_id=' + object.movie.kinopoisk_id);
             
+            // Названия (Обязательно!)
             query.push('title=' + encodeURIComponent(object.movie.title || object.movie.name));
             query.push('original_title=' + encodeURIComponent(object.movie.original_title || object.movie.original_name));
-            query.push('serial=' + (object.movie.name ? 1 : 0));
             
-            // Хеш email для cub_id (критично для проверки подписки/доступа)
-            if (SETTINGS.email) query.push('cub_id=' + Lampa.Utils.hash(SETTINGS.email));
+            // Дополнительно
+            query.push('serial=' + (object.movie.name ? 1 : 0));
+            query.push('cub_id=' + Lampa.Utils.hash(SETTINGS.email));
             
             return base_url + (base_url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
         };
@@ -63,10 +79,13 @@
                 if (type == 'sort') {
                     balanser_name = a.source;
                     Lampa.Storage.set('skaz_last_balanser', balanser_name);
-                    if (sources[balanser_name]) {
-                        current_source = sources[balanser_name].url;
-                        _this.find();
-                    }
+                    
+                    // Формируем URL для выбранного балансера
+                    // Пример: http://online3.skaz.tv/lite/rhsprem?title=...
+                    var base = SETTINGS.current_mirror + 'lite/' + balanser_name;
+                    current_source = _this.requestParams(base);
+                    
+                    _this.find();
                 }
             };
             
@@ -80,7 +99,7 @@
             files.appendFiles(scroll.render());
             files.appendHead(filter.render());
             
-            // Случайный выбор зеркала при старте
+            // Случайный выбор зеркала
             SETTINGS.current_mirror = MIRRORS[Math.floor(Math.random() * MIRRORS.length)];
             
             this.start();
@@ -98,7 +117,7 @@
             scroll.body().append(Lampa.Template.get('lampac_content_loading'));
 
             this.getIds().then(function() {
-                _this.loadSourceMap();
+                _this.loadBalansers();
             });
         };
 
@@ -116,49 +135,27 @@
             });
         };
 
-        this.loadSourceMap = function() {
+        this.loadBalansers = function() {
             var _this = this;
-            // Добавил life=true и rjson=true, как в оригинале
             var url = this.requestParams(SETTINGS.current_mirror + 'lite/events?life=true');
             url = this.account(url);
 
-            network.timeout(15000);
+            network.timeout(10000);
             network.silent(url, function(json) {
-                if (json.accsdb) {
-                     // Если все равно просит, попробуем обойти через прямой запрос
-                     console.log('SkazLite: AccsDB block, trying direct fallback');
-                     _this.fallbackDirectMode();
-                } else if (json.online && json.online.length) {
+                // Если сервер вернул список - используем его
+                if (json.online && json.online.length) {
                     _this.buildFilter(json.online);
-                } else {
-                    _this.empty('Источники не найдены');
+                } 
+                // Если нет - используем список по умолчанию (Fallback)
+                else {
+                    console.log('SkazLite: Сервер не вернул список, используем дефолтный');
+                    _this.buildFilter(DEFAULT_BALANSERS);
                 }
             }, function() {
-                // Failover
-                var next_mirror_idx = (MIRRORS.indexOf(SETTINGS.current_mirror) + 1) % MIRRORS.length;
-                SETTINGS.current_mirror = MIRRORS[next_mirror_idx];
-                var url2 = _this.requestParams(SETTINGS.current_mirror + 'lite/events?life=true');
-                network.silent(_this.account(url2), function(json){
-                     if (json.online) _this.buildFilter(json.online);
-                     else _this.empty('Источники не найдены (2)');
-                }, function() {
-                    _this.empty('Серверы недоступны');
-                });
+                // Ошибка сети - тоже используем дефолтный список
+                console.log('SkazLite: Ошибка сети, используем дефолтный список');
+                _this.buildFilter(DEFAULT_BALANSERS);
             });
-        };
-
-        // Режим, если сервер блокирует получение списка
-        this.fallbackDirectMode = function() {
-            var _this = this;
-            // Генерируем список вручную из популярных бесплатных
-            var manual_list = [
-                { name: 'VideoCDN', balanser: 'videocdn', url: SETTINGS.current_mirror + 'lite/videocdn' },
-                { name: 'Alloha', balanser: 'alloha', url: SETTINGS.current_mirror + 'lite/alloha' },
-                { name: 'Collaps', balanser: 'collaps', url: SETTINGS.current_mirror + 'lite/collaps' },
-                { name: 'Ashdi', balanser: 'ashdi', url: SETTINGS.current_mirror + 'lite/ashdi' },
-                { name: 'HDVB', balanser: 'hdvb', url: SETTINGS.current_mirror + 'lite/hdvb' }
-            ];
-            this.buildFilter(manual_list);
         };
 
         this.buildFilter = function(online_list) {
@@ -167,19 +164,17 @@
             sources = {};
             
             online_list.forEach(function(item) {
-                var name = (item.balanser || item.name).toLowerCase();
+                var name = (item.balanser || item.name || '').toLowerCase();
+                if (!name) return; // Пропуск битых
+                
                 sources[name] = {
-                    name: item.name,
-                    url: item.url
+                    name: item.name || name,
+                    // Если URL нет (в дефолтном списке), формируем его сами
+                    url: item.url || (SETTINGS.current_mirror + 'lite/' + name)
                 };
                 
-                // Пропускаем явно платные/проблемные, если мы в fallback режиме
-                if (name === 'rezka' || name === 'filmix' || name === 'kinopub') {
-                    // Можно скрыть их, но пока оставим для теста
-                }
-
                 filter_items.push({
-                    title: item.name,
+                    title: sources[name].name,
                     source: name,
                     selected: false
                 });
@@ -196,7 +191,14 @@
             filter.chosen('sort', [sources[active].name]);
             
             balanser_name = active;
-            current_source = sources[active].url;
+            
+            // Формируем финальный URL для запроса
+            // Если URL был готовый (с сервера) - берем его, если нет - строим сами с параметрами
+            if (sources[active].url.indexOf('?') > -1) {
+                current_source = sources[active].url;
+            } else {
+                current_source = _this.requestParams(sources[active].url);
+            }
             
             scroll.body().find('.lampac-content-loading').remove();
             
@@ -208,9 +210,7 @@
             scroll.clear();
             scroll.body().append(Lampa.Template.get('lampac_content_loading'));
 
-            // Важно: добавляем параметры запроса к URL источника
-            var url = this.requestParams(current_source);
-            url = this.account(url);
+            var url = this.account(current_source);
 
             network.native(url, function(str) {
                 _this.parse(str);
@@ -223,10 +223,13 @@
             var _this = this;
             scroll.clear();
             
+            var is_json = false;
             try {
                 var json = JSON.parse(str);
+                is_json = true;
+                // Игнорируем ошибку accsdb, если это возможно, или выводим сообщение
                 if (json.accsdb || json.msg) {
-                    return _this.empty(json.msg || 'Нужна авторизация для этого источника. Выберите другой.');
+                    return _this.empty(json.msg || 'Источник требует авторизации. Попробуйте другой.');
                 }
             } catch(e) {}
 
@@ -235,6 +238,7 @@
             if (content.length) {
                 content.each(function() {
                     var element = $(this);
+                    
                     element.on('hover:enter', function() {
                         var data = element.data('json');
                         if (data && data.url) {
@@ -249,7 +253,8 @@
                     scroll.append(element);
                 });
             } else {
-                 _this.empty('Контент не найден в этом источнике');
+                 if (is_json) _this.empty('Пустой ответ от источника');
+                 else _this.empty('Контент не найден');
             }
             Lampa.Controller.enable('content');
         };
