@@ -19,6 +19,7 @@
         var MIRRORS = [
             'http://online3.skaz.tv/',
             'http://online7.skaz.tv/',
+            'http://onlinecf3.skaz.tv/,'
             'http://online5.skaz.tv/'
         ];
 
@@ -48,14 +49,12 @@
             { name: 'Kodik', balanser: 'kodik' }
         ];
 
-        // ЛОГИРОВАНИЕ
         function log(msg, data) {
             console.log('[SkazLite]', msg, data || '');
         }
 
         this.account = function(url) {
-            // Иногда для определенных балансеров не нужно добавлять подпись, если это прямая ссылка
-            // Но пока оставляем как есть для унификации
+            if (!url) return url;
             if (url.indexOf('account_email=') == -1) url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(SETTINGS.email));
             if (url.indexOf('uid=') == -1) url = Lampa.Utils.addUrlComponent(url, 'uid=' + encodeURIComponent(SETTINGS.uid));
             if (url.indexOf('lampac_unic_id=') == -1) url = Lampa.Utils.addUrlComponent(url, 'lampac_unic_id=' + encodeURIComponent(unic_id));
@@ -114,7 +113,6 @@
             files.appendFiles(scroll.render());
             files.appendHead(filter.render());
             
-            // Выбираем случайное зеркало при старте
             SETTINGS.current_mirror = MIRRORS[Math.floor(Math.random() * MIRRORS.length)];
             log('Start on mirror:', SETTINGS.current_mirror);
             
@@ -235,12 +233,11 @@
             }, false, { dataType: 'text' });
         };
         
-        // Попытка сменить зеркало при ошибке
         this.tryNextMirror = function() {
             var current_idx = MIRRORS.indexOf(SETTINGS.current_mirror);
             var next_idx = (current_idx + 1) % MIRRORS.length;
             
-            if (next_idx === 0) { // Прошли круг
+            if (next_idx === 0) { 
                 this.showMessage('Ошибка сети. Все зеркала недоступны.');
                 return;
             }
@@ -248,7 +245,6 @@
             SETTINGS.current_mirror = MIRRORS[next_idx];
             log('Switching mirror to:', SETTINGS.current_mirror);
             
-            // Перестраиваем URL с новым зеркалом
             var base = SETTINGS.current_mirror + 'lite/' + active_source_name;
             current_source = this.requestParams(base);
             
@@ -262,7 +258,6 @@
                 var json = JSON.parse(str);
                 if (json.accsdb || json.msg) {
                     log('Access blocked by server:', json.msg);
-                    // Пробуем другое зеркало, возможно там не забанено
                     return _this.tryNextMirror();
                 }
             } catch(e) {}
@@ -285,13 +280,20 @@
                         
                         if (data && data.url) {
                             if (data.method == 'play' || data.method == 'call') {
-                                log('Playing media:', data.url);
+                                
+                                // --- ИСПРАВЛЕНИЕ: Добавляем подпись к URL видео ---
+                                data.url = _this.account(data.url);
+                                
+                                log('Playing media (signed):', data.url);
+                                
                                 Lampa.Player.play(data);
                                 
                                 var playlist = [];
                                 content.each(function(){
                                     var item = $(this).data('json');
                                     if(item.method == 'play' || item.method == 'call'){
+                                        // И к каждому элементу плейлиста тоже
+                                        item.url = _this.account(item.url); 
                                         playlist.push(item);
                                     }
                                 });
