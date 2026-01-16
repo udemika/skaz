@@ -55,6 +55,14 @@
 
         this.account = function(url) {
             if (!url) return url;
+            
+            // ВАЖНОЕ ИСПРАВЛЕНИЕ:
+            // Если ссылка на mp4 или m3u8 — НЕ добавляем параметры, чтобы не ломать CDN
+            if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) {
+                return url;
+            }
+
+            // Добавляем параметры только для ссылок API (Skaz.tv)
             if (url.indexOf('account_email=') == -1) url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(SETTINGS.email));
             if (url.indexOf('uid=') == -1) url = Lampa.Utils.addUrlComponent(url, 'uid=' + encodeURIComponent(SETTINGS.uid));
             if (url.indexOf('lampac_unic_id=') == -1) url = Lampa.Utils.addUrlComponent(url, 'lampac_unic_id=' + encodeURIComponent(unic_id));
@@ -263,7 +271,6 @@
                         
                         if (data && data.url) {
                             if (data.method == 'play' || data.method == 'call') {
-                                // ЗАПУСКАЕМ ЧЕРЕЗ РЕЗОЛВЕР
                                 _this.play(data); 
                             } else if (data.method == 'link') {
                                 current_source = data.url;
@@ -279,36 +286,44 @@
             Lampa.Controller.enable('content');
         };
         
-        // НОВАЯ ФУНКЦИЯ ДЛЯ ЗАГРУЗКИ РЕАЛЬНОЙ ССЫЛКИ
         this.play = function(data) {
             var _this = this;
+            var url = _this.account(data.url); // Здесь теперь ПРАВИЛЬНАЯ обработка URL
+            
+            // Если это уже видеофайл -> играем сразу
+            if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) {
+                log('Playing direct video file:', url);
+                data.url = url; 
+                Lampa.Player.play(data);
+                Lampa.Player.playlist([data]); 
+                return;
+            }
+
+            // Если это API -> резолвим
             Lampa.Loading.start(function() {
                 Lampa.Loading.stop();
             });
 
-            var url = _this.account(data.url);
-            log('Resolving video link:', url);
+            log('Resolving API link:', url);
 
             network.silent(url, function(json) {
                 Lampa.Loading.stop();
                 
                 if (json && json.url) {
-                    log('Video resolved:', json.url);
+                    // Резолвер тоже может вернуть ссылку, которую надо проверить на наличие параметров
+                    var clean_video_url = _this.account(json.url); 
+                    log('Video resolved from API:', clean_video_url);
                     
                     var video_data = {
                         title: data.title || json.title,
-                        url: _this.account(json.url),
+                        url: clean_video_url,
                         quality: json.quality || {},
                         subtitles: json.subtitles || [],
                         timeline: json.timeline || {}
                     };
                     
                     Lampa.Player.play(video_data);
-                    
-                    // Попытка собрать плейлист (упрощенная)
-                    var playlist = [];
-                    playlist.push(video_data); 
-                    Lampa.Player.playlist(playlist);
+                    Lampa.Player.playlist([video_data]);
                     
                 } else {
                     Lampa.Noty.show('Не удалось получить ссылку на видео');
