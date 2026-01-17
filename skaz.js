@@ -2,6 +2,7 @@
 'use strict';
 
 function SkazLite(object) {
+
 var network = new Lampa.Reguest();
 var scroll = new Lampa.Scroll({ mask: true, over: true });
 var files = new Lampa.Explorer(object);
@@ -61,22 +62,12 @@ SETTINGS.current_proxy = PROXIES[Math.floor(Math.random() * PROXIES.length)];
 log('Switched proxy to:', SETTINGS.current_proxy);
 }
 
-this.clearFrontProxy = function(url) {
-if (!url) return '';
-
-for (var i = 0; i < PROXIES.length; i++) {
-if (url.indexOf(PROXIES[i]) === 0) {
-url = url.replace(PROXIES[i], '');
-break;
-}
-}
-
-return url;
-};
+// ============ PROXY FUNCTIONS ============
 
 this.clearProxy = function(url) {
 if (!url) return '';
 var cleaned = false;
+
 do {
 cleaned = false;
 for (var i = 0; i < PROXIES.length; i++) {
@@ -93,7 +84,7 @@ return url;
 this.proxify = function(url) {
 if (!url) return '';
 
-if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) return this.clearFrontProxy(url);
+if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) return this.clearProxy(url);
 
 for (var i = 0; i < PROXIES.length; i++) {
 if (url.indexOf(PROXIES[i]) === 0) return url;
@@ -108,7 +99,7 @@ this.account = function(url) {
 if (!url) return url;
 
 if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) {
-return this.clearFrontProxy(url);
+return this.clearProxy(url);
 }
 
 if (url.indexOf('account_email=') == -1) url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(SETTINGS.email));
@@ -136,6 +127,8 @@ query.push(key + '=' + encodeURIComponent(extra_params[key]));
 
 return base_url + (base_url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
 };
+
+// ============ MAIN METHODS ============
 
 this.create = function() {
 var _this = this;
@@ -364,16 +357,20 @@ Lampa.Controller.enable('content');
 this.play = function(data) {
 var _this = this;
 
+// Получаем ссылку и ЧИСТИМ ОТ ВСЕХ ПРОКСИ
 var url = _this.account(data.url);
+url = _this.clearProxy(url);
 
+// Если это файл - играем ЧИСТЫЙ URL (без прокси!)
 if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) {
-log('Playing direct video file:', url);
+log('Playing direct video file (CLEAN):', url);
 data.url = url;
 Lampa.Player.play(data);
 Lampa.Player.playlist([data]);
 return;
 }
 
+// Если это API - проксируем для резолвинга
 Lampa.Loading.start(function() {
 Lampa.Loading.stop();
 });
@@ -385,16 +382,15 @@ network.silent(resolve_url, function(json) {
 Lampa.Loading.stop();
 
 if (json && json.url) {
-var video_url = json.url;
-if (video_url.indexOf('account_email=') === -1) {
-video_url = _this.account(video_url);
-}
+// Резолвер вернул ссылку. Снова чистим её от прокси (на всякий случай)
+var clean_video_url = _this.clearProxy(json.url);
+clean_video_url = _this.account(clean_video_url);
 
-log('Video resolved:', video_url);
+log('Video resolved (CLEAN):', clean_video_url);
 
 var video_data = {
 title: data.title || json.title,
-url: video_url,
+url: clean_video_url,
 quality: json.quality || {},
 subtitles: json.subtitles || [],
 timeline: json.timeline || {}
@@ -408,6 +404,7 @@ Lampa.Noty.show('Не удалось получить ссылку на виде
 }
 }, function() {
 Lampa.Loading.stop();
+// Если прокси сбоит при резолвинге - меняем его
 rotateProxy();
 Lampa.Noty.show('Ошибка запроса видео (Прокси сменили)');
 });
@@ -499,6 +496,7 @@ files = null;
 scroll = null;
 filter = null;
 };
+
 }
 
 function startPlugin() {
