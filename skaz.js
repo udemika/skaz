@@ -16,13 +16,13 @@
             voice: []
         };
         
-        // --- СПИСОК ПРОКСИ ---
+        // --- АКТУАЛЬНЫЙ СПИСОК ПРОКСИ ---
         var PROXIES = [
-            'https://cors.byskaz.ru/',
-            'http://85.198.110.239:8975/',
-            'http://91.184.245.56:8975/',
-            'https://apn10.akter-black.com/',
             'https://apn5.akter-black.com/',
+            'https://apn10.akter-black.com/',
+            'https://apn7.akter-black.com/',
+            'https://apn6.akter-black.com/',
+            'https://apn2.akter-black.com/',
             'https://cors557.deno.dev/'
         ];
 
@@ -37,7 +37,7 @@
             email: 'aklama@mail.ru',
             uid: 'guest',
             current_mirror: MIRRORS[0],
-            current_proxy: PROXIES[0] // Текущий прокси
+            current_proxy: PROXIES[0] 
         };
 
         var DEFAULT_BALANSERS = [
@@ -66,9 +66,8 @@
 
         // Обертка для URL через прокси
         this.proxify = function(url) {
-            // Не проксируем, если это уже проксированная ссылка или прямой файл
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) return url;
-            if (url.indexOf('http') !== 0) return url; // Относительные ссылки не трогаем
+            if (url.indexOf('http') !== 0) return url; 
             
             return SETTINGS.current_proxy + url;
         };
@@ -135,7 +134,7 @@
             files.appendFiles(scroll.render());
             files.appendHead(filter.render());
             
-            rotateProxy(); // Выбираем прокси при старте
+            rotateProxy(); 
             SETTINGS.current_mirror = MIRRORS[Math.floor(Math.random() * MIRRORS.length)];
             
             this.start();
@@ -163,12 +162,11 @@
                 if (object.movie.kinopoisk_id || object.movie.imdb_id) return resolve();
                 
                 var url = _this.account(SETTINGS.current_mirror + 'externalids?id=' + object.movie.id);
-                // Пробуем получить ID через прокси
                 network.silent(_this.proxify(url), function(json) {
                     if (json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
                     if (json.imdb_id) object.movie.imdb_id = json.imdb_id;
                     resolve();
-                }, resolve); // Если ошибка, просто идем дальше
+                }, resolve);
             });
         };
 
@@ -177,8 +175,7 @@
             var url = this.requestParams(SETTINGS.current_mirror + 'lite/events?life=true');
             url = this.account(url);
             
-            // Используем прокси для загрузки списка балансеров
-            network.timeout(15000); // Чуть больше таймаут для прокси
+            network.timeout(15000); 
             network.silent(_this.proxify(url), function(json) {
                 if (json.online && json.online.length) {
                     _this.buildSourceFilter(json.online);
@@ -245,7 +242,6 @@
             network.native(proxied_url, function(str) {
                 _this.parse(str);
             }, function() {
-                // Если ошибка сети - меняем прокси и зеркало
                 rotateProxy();
                 setTimeout(function(){
                     _this.tryNextMirror();
@@ -277,7 +273,6 @@
             try {
                 var json = JSON.parse(str);
                 if (json.accsdb || json.msg) {
-                    // Если забанили - меняем прокси
                     rotateProxy();
                     return _this.tryNextMirror();
                 }
@@ -330,7 +325,6 @@
                 Lampa.Loading.stop();
             });
 
-            // Для резолвинга ссылки тоже используем прокси, если нужно
             var resolve_url = _this.proxify(url);
             log('Resolving API link via proxy:', resolve_url);
 
@@ -410,4 +404,73 @@
             if (filter_items.season.length) {
                 items.push({
                     title: 'Сезон',
-                    subtitle: (filter_items.season.find(f=>f.selected) || {}).title || 'Выбра
+                    subtitle: (filter_items.season.find(f=>f.selected) || {}).title || 'Выбрать',
+                    stype: 'season',
+                    items: filter_items.season
+                });
+            }
+            
+            if (filter_items.voice.length) {
+                items.push({
+                    title: 'Перевод',
+                    subtitle: (filter_items.voice.find(f=>f.selected) || {}).title || 'Выбрать',
+                    stype: 'voice',
+                    items: filter_items.voice
+                });
+            }
+            
+            filter.set('filter', items);
+        };
+
+        this.showMessage = function(msg) {
+            scroll.clear();
+            var html = Lampa.Template.get('lampac_does_not_answer', {});
+            html.find('.online-empty__title').html(msg);
+            html.find('.online-empty__buttons').remove();
+            scroll.append(html);
+        };
+        
+        this.destroy = function() {
+            network.clear();
+            files.destroy();
+            scroll.destroy();
+            network = null;
+            files = null;
+            scroll = null;
+            filter = null;
+        };
+    }
+
+    function startPlugin() {
+        if (window.plugin_skaz_lite_ready) return;
+        window.plugin_skaz_lite_ready = true;
+
+        Lampa.Component.add('skaz_lite', SkazLite);
+
+        Lampa.Listener.follow('full', function (e) {
+            if (e.type == 'complite') {
+                var btn = $('<div class="full-start__button selector view--online" data-subtitle="Skaz Lite"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16.14 2.86l-3.37 1.83C12.35 4.93 12 5.37 12 5.86v13.06c0 1.05 1.15 1.69 2.05 1.15l8.67-5.2c.86-.52.86-1.78 0-2.3l-5.63-3.38V5.86c0-.42-.23-.81-.6-1.02l-4.35-1.98z" fill="white"/><path opacity="0.4" d="M12.77 4.69l-3.37-1.83a1.18 1.18 0 0 0-1.09 0l-5.63 3.38c-.86.52-.86 1.78 0 2.3l8.67 5.2c.9.54 2.05-.1 2.05-1.15V5.86c0-.49-.35-.93-.63-1.17z" fill="white"/></svg><span>SkazLite</span></div>');
+
+                btn.on('hover:enter', function () {
+                    Lampa.Activity.push({
+                        url: '',
+                        title: 'Skaz Lite',
+                        component: 'skaz_lite',
+                        movie: e.data.movie,
+                        page: 1
+                    });
+                });
+
+                e.object.activity.render().find('.view--torrent').after(btn);
+            }
+        });
+    }
+
+    if (window.appready) startPlugin();
+    else {
+        Lampa.Listener.follow('app', function (e) {
+            if (e.type == 'ready') startPlugin();
+        });
+    }
+
+})();
