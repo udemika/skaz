@@ -22,7 +22,8 @@ var PROXIES = [
 'https://apn10.akter-black.com/',
 'https://apn7.akter-black.com/',
 'https://apn6.akter-black.com/',
-'https://apn2.akter-black.com/'
+'https://apn2.akter-black.com/',
+'https://cors557.deno.dev/'
 ];
 
 var MIRRORS = [
@@ -83,14 +84,18 @@ return url;
 this.proxify = function(url) {
 if (!url) return '';
 
+// БЕЗ прокси для прямых видеоссылок
 if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) return this.clearProxy(url);
 
+// Если уже есть прокси - вернуть как есть
 for (var i = 0; i < PROXIES.length; i++) {
 if (url.indexOf(PROXIES[i]) === 0) return url;
 }
 
+// Если не http - не прокси
 if (url.indexOf('http') !== 0) return url;
 
+// Добавляем прокси ОДИН РАЗ
 return SETTINGS.current_proxy + url;
 };
 
@@ -365,9 +370,19 @@ if (data.method === 'play' && data.url && (data.url.indexOf('.mp4') > -1 || data
 var clean_url = _this.clearProxy(data.url);
 log('Direct play URL (CLEAN):', clean_url);
 
+// ✓ ДЛЯ ПРЯМЫХ ССЫЛОК ИСПОЛЬЗУЕМ ПРОКСИ (кроме .mp4 и .m3u8)
+var final_url = clean_url;
+
+// Если это не mp4/m3u8, может понадобиться прокси
+if (clean_url.indexOf('cdnsqu.com') > -1 || clean_url.indexOf('cdn') > -1) {
+final_url = _this.proxify(final_url);
+}
+
+log('Final URL to play:', final_url);
+
 var video_data = {
 title: data.title || 'Видео',
-url: clean_url,
+url: final_url,
 quality: data.quality || {},
 subtitles: data.subtitles || [],
 timeline: data.timeline || {}
@@ -387,16 +402,19 @@ Lampa.Loading.stop();
 // Берём URL или STREAM для API запроса
 var api_url = data.url || data.stream;
 
-// ✓ ШАГИ ОБРАБОТКИ УРЛА:
+// ✓ ШАГИ ОБРАБОТКИ:
 // 1. Очищаем от ВСЕХ прокси префиксов
 api_url = _this.clearProxy(api_url);
 
-// 2. Добавляем авторизацию (account_email и uid)
+// 2. Добавляем авторизацию
 api_url = _this.account(api_url);
 
-log('Requesting video API:', api_url);
+// 3. ДОБАВЛЯЕМ ПРОКСИ для VideoCDN и других
+api_url = _this.proxify(api_url);
 
-// 3. Отправляем БЕЗ прокси, но с авторизацией (это ОЧЕНЬ важно!)
+log('Requesting video API (WITH PROXY):', api_url);
+
+// 4. Отправляем С ПРОКСИ
 network.silent(api_url, function(response) {
 Lampa.Loading.stop();
 
@@ -421,7 +439,7 @@ return;
 if (response && response.url) {
 var final_url = response.url;
 
-// Очищаем финальный URL от прокси (на всякий случай)
+// Очищаем от прокси
 final_url = _this.clearProxy(final_url);
 
 log('Final video URL:', final_url);
@@ -452,7 +470,7 @@ Lampa.Noty.show('Сервер не вернул ссылку на видео. П
 }
 
 }, function(err) {
-// ✗ Ошибка сети при запросе видео
+// ✗ Ошибка сети
 Lampa.Loading.stop();
 log('Network error when requesting video:', err);
 rotateProxy();
