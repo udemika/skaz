@@ -262,8 +262,12 @@
                 current_postid = movie.postid;
                 current_season = 1;
                 current_voice_idx = 0;
+
+                // обязательно очищаем, чтобы меню не показывало старые сезоны/переводы
+                filter_find.season = [];
                 filter_find.voice = [];
                 voice_params = [];
+                plugin.updateFilterMenu();
 
                 // грузим первый сезон/общую страницу по выбранному postid
                 plugin.loadSeason(current_season);
@@ -283,8 +287,10 @@
         this.create = function () {
             var _this = this;
 
+            // ВАЖНО: не уходим из активности назад при "Back" в фильтре — просто закрываем фильтр
             filter.onBack = function () {
-                Lampa.Activity.backward();
+                if (filter && typeof filter.hide === 'function') filter.hide();
+                else if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') Lampa.Select.close();
             };
 
             filter.onSelect = function (type, a, b) {
@@ -652,7 +658,7 @@
             this.loadSeason(current_season || 1);
         };
 
-        // ====== Парсинг (как в swo.js: похожие -> список выбора) ======
+        // ====== Парсинг (похожие -> СИСТЕМНЫЙ выбор через Lampa.Select) ======
         this.parseInitial = function (html) {
             var _this = this;
 
@@ -750,10 +756,18 @@
 
                         var title = ($item.find('.videos__season-title').text() || $item.find('.videos__item-title').text() || '').trim();
 
+                        // postid может быть и в формате postid=..., и в postid/...
                         var postid = null;
                         if (j.url) {
-                            var m = (j.url + '').match(/postid=([^&]+)/);
-                            if (m && m[1]) postid = m[1];
+                            var urlStr = (j.url + '');
+
+                            var m1 = urlStr.match(/postid=([^&]+)/);
+                            if (m1 && m1[1]) postid = m1[1];
+
+                            if (!postid) {
+                                var m2 = urlStr.match(/postid\/([^/?&]+)/);
+                                if (m2 && m2[1]) postid = m2[1];
+                            }
                         }
 
                         var kp = j.kinopoisk_id || j.kp_id || j.kinopoiskid || j.kpid;
@@ -790,7 +804,61 @@
             }
         };
 
+        // ====== ВАЖНО: системное окно выбора похожих ======
         this.showSimilarMoviesList = function (movies) {
+            var _this = this;
+
+            // 1) Основной вариант — системный Select
+            if (window.Lampa && Lampa.Select && typeof Lampa.Select.show === 'function') {
+                var items = (movies || []).map(function (m, i) {
+                    var t = (m && m.title ? m.title : 'Без названия');
+                    if (m && m.year) t += ' (' + m.year + ')';
+                    return {
+                        title: t,
+                        index: i,
+                        selected: i === 0
+                    };
+                });
+
+                if (!items.length) return _this.empty('Не удалось найти варианты по названию');
+
+                Lampa.Select.show({
+                    title: 'Выбор фильма',
+                    items: items,
+                    onSelect: function (item, index) {
+                        var i = null;
+
+                        if (typeof index === 'number') i = index;
+                        else if (typeof item === 'number') i = item;
+                        else if (item && typeof item.index === 'number') i = item.index;
+
+                        if (i === null) i = 0;
+
+                        var movie = movies[i];
+                        if (!movie || !movie.postid) return;
+
+                        current_postid = movie.postid;
+                        current_season = 1;
+                        current_voice_idx = 0;
+
+                        // обязательно очищаем, чтобы меню не показывало старые сезоны/переводы
+                        filter_find.season = [];
+                        filter_find.voice = [];
+                        voice_params = [];
+                        _this.updateFilterMenu();
+
+                        _this.loadSeason(1);
+
+                        if (Lampa.Select && typeof Lampa.Select.close === 'function') {
+                            setTimeout(Lampa.Select.close, 10);
+                        }
+                    }
+                });
+
+                return;
+            }
+
+            // 2) Fallback — старый список (если Select недоступен)
             scroll.clear();
 
             var title = $('<div style="opacity:0.75; padding: 0.8em 0.2em 0.4em 0.2em;">Выберите вариант (год выпуска)</div>');
@@ -887,7 +955,7 @@
                     return (a.episode || 0) - (b.episode || 0);
                 });
 
-                // рисуем как на скриншоте — большими карточками
+                // рисуем большими карточками
                 for (var i = 0; i < episodes.length; i++) {
                     scroll.append(makeEpisodeCard(episodes[i]));
                 }
