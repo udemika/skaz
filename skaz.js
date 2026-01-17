@@ -22,8 +22,7 @@ var PROXIES = [
 'https://apn10.akter-black.com/',
 'https://apn7.akter-black.com/',
 'https://apn6.akter-black.com/',
-'https://apn2.akter-black.com/',
-'https://cors557.deno.dev/'
+'https://apn2.akter-black.com/'
 ];
 
 var MIRRORS = [
