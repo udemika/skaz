@@ -357,57 +357,95 @@ Lampa.Controller.enable('content');
 this.play = function(data) {
 var _this = this;
 
-// Получаем ссылку и ЧИСТИМ ОТ ВСЕХ ПРОКСИ
-var url = _this.account(data.url);
-url = _this.clearProxy(url);
+log('Play method:', data.method);
+log('Play URL:', data.url);
+log('Play Stream:', data.stream);
 
-// Если это файл - играем ЧИСТЫЙ URL (без прокси!)
-if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) {
-log('Playing direct video file (CLEAN):', url);
-data.url = url;
-Lampa.Player.play(data);
-Lampa.Player.playlist([data]);
+// ЕСЛИ ЭТО ПРЯМАЯ ССЫЛКА НА ВИДЕО (method: play и .mp4/.m3u8)
+if (data.method === 'play' && data.url && (data.url.indexOf('.mp4') > -1 || data.url.indexOf('.m3u8') > -1)) {
+var clean_url = _this.clearProxy(data.url);
+log('Direct play URL (CLEAN):', clean_url);
+
+var video_data = {
+title: data.title || 'Видео',
+url: clean_url,
+quality: data.quality || {},
+subtitles: data.subtitles || [],
+timeline: data.timeline || {}
+};
+
+Lampa.Player.play(video_data);
+Lampa.Player.playlist([video_data]);
 return;
 }
 
-// Если это API - проксируем для резолвинга
+// ЕСЛИ ЭТО ВТОРОЙ ШАГ (method: call) - запросить видео БЕЗ ПРОКСИ
+if (data.method === 'call' || data.url) {
 Lampa.Loading.start(function() {
 Lampa.Loading.stop();
 });
 
-var resolve_url = _this.proxify(url);
-log('Resolving API link via proxy:', resolve_url);
+// Берём URL или STREAM для API запроса
+var api_url = data.url || data.stream;
 
-network.silent(resolve_url, function(json) {
+// ★ КРИТИЧНО: Очищаем от ВСЕХ прокси перед отправкой
+api_url = _this.clearProxy(api_url);
+
+log('Requesting video (NO PROXY):', api_url);
+
+// ★ Отправляем БЕЗ прокси - это важно для Alloha и др.
+network.silent(api_url, function(response) {
 Lampa.Loading.stop();
 
-if (json && json.url) {
-// Резолвер вернул ссылку. Снова чистим её от прокси (на всякий случай)
-var clean_video_url = _this.clearProxy(json.url);
-clean_video_url = _this.account(clean_video_url);
+log('API Response type:', typeof response);
+log('API Response:', JSON.stringify(response));
 
-log('Video resolved (CLEAN):', clean_video_url);
+// Проверяем ошибку акаунта
+if (response && response.accsdb) {
+log('Account error - need login');
+Lampa.Noty.show('Требуется вход в аккаунт Skaz');
+return;
+}
+
+// Ищем URL в ответе
+if (response && response.url) {
+var final_url = response.url;
+
+// Очищаем от прокси (на всякий случай)
+final_url = _this.clearProxy(final_url);
+
+log('Final video URL (CLEAN):', final_url);
 
 var video_data = {
-title: data.title || json.title,
-url: clean_video_url,
-quality: json.quality || {},
-subtitles: json.subtitles || [],
-timeline: json.timeline || {}
+title: response.title || data.title || 'Видео',
+url: final_url,
+quality: response.quality || {},
+subtitles: response.subtitles || [],
+timeline: response.timeline || {}
 };
 
 Lampa.Player.play(video_data);
 Lampa.Player.playlist([video_data]);
 
 } else {
+log('ERROR: No url in response!');
+log('Response keys:', response ? Object.keys(response) : 'null response');
 Lampa.Noty.show('Не удалось получить ссылку на видео');
 }
-}, function() {
+
+}, function(err) {
 Lampa.Loading.stop();
-// Если прокси сбоит при резолвинге - меняем его
+log('Network error:', err);
 rotateProxy();
-Lampa.Noty.show('Ошибка запроса видео (Прокси сменили)');
+Lampa.Noty.show('Ошибка запроса видео');
 });
+
+return;
+}
+
+// На случай если ничего не сработало
+log('Unknown video format');
+Lampa.Noty.show('Неизвестный формат видео');
 };
 
 this.parseFilters = function(html) {
