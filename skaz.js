@@ -8,7 +8,7 @@
         var filter = new Lampa.Filter(object);
 
         var sources = {};
-        var current_source = '';       // ВСЕГДА хранится БЕЗ прокси
+        var current_source = '';       // всегда без прокси
         var active_source_name = '';
 
         var filter_items = {
@@ -16,7 +16,7 @@
             voice: []
         };
 
-        // cors557.deno.dev убран
+        // прокси (cors557 удалён)
         var PROXIES = [
             'https://apn5.akter-black.com/',
             'https://apn10.akter-black.com/',
@@ -25,7 +25,7 @@
             'https://apn2.akter-black.com/'
         ];
 
-        // onlinecf3.skaz.tv удалён
+        // onlinecf3 удалён
         var MIRRORS = [
             'http://online3.skaz.tv/',
             'http://online7.skaz.tv/'
@@ -38,19 +38,25 @@
             current_proxy: PROXIES[0]
         };
 
+        // ======= ТОЛЬКО НУЖНЫЕ БАЛАНСЕРЫ =======
         var DEFAULT_BALANSERS = [
             { name: 'VideoCDN', balanser: 'videocdn' },
-            { name: 'Alloha', balanser: 'alloha' },
-            { name: 'Collaps', balanser: 'collaps' },
-            { name: 'RHS Premium', balanser: 'rhsprem' },
-            { name: 'Rezka', balanser: 'rezka' },
             { name: 'Filmix', balanser: 'filmix' },
-            { name: 'Ashdi', balanser: 'ashdi' },
-            { name: 'Kinogo', balanser: 'kinogo' },
-            { name: 'Zetflix', balanser: 'zetflix' },
-            { name: 'HDVB', balanser: 'hdvb' },
-            { name: 'Kodik', balanser: 'kodik' }
+            { name: 'kinopub', balanser: 'kinopub' },
+            { name: 'Alloha', balanser: 'alloha' },
+            { name: 'RHS Premium', balanser: 'rhsprem' },
+            { name: 'Rezka', balanser: 'rezka' }
         ];
+
+        // whitelist (на случай если events вернёт лишнее)
+        var ALLOWED_BALANSERS = {
+            videocdn: true,
+            filmix: true,
+            kinopub: true,
+            alloha: true,
+            rhsprem: true,
+            rezka: true
+        };
 
         function log(msg, data) {
             console.log('[SkazLite]', msg, data || '');
@@ -88,9 +94,7 @@
         this.proxify = function (url) {
             url = this.normalizeUrl(url);
             if (!url) return '';
-
             if (url.indexOf('http') !== 0) return url;
-
             return SETTINGS.current_proxy + url;
         };
 
@@ -99,7 +103,7 @@
 
             var clean = this.normalizeUrl(url);
 
-            // account_email/uid не добавляем к прямым потокам
+            // не добавляем account_email/uid к прямым потокам
             if (clean.indexOf('.mp4') > -1 || clean.indexOf('.m3u8') > -1) {
                 return clean;
             }
@@ -291,6 +295,9 @@
                 var name = (item.balanser || item.name || '').toLowerCase();
                 if (!name) return;
 
+                // ======= ВАЖНО: режем всё лишнее, оставляем только whitelist =======
+                if (!ALLOWED_BALANSERS[name]) return;
+
                 var url = item.url || (SETTINGS.current_mirror + 'lite/' + name);
                 url = _this.normalizeUrl(url);
 
@@ -305,6 +312,26 @@
                     selected: false
                 });
             });
+
+            // Если сервер вернул 0 из whitelist — используем дефолтные 6 балансеров
+            if (!source_items.length) {
+                (DEFAULT_BALANSERS || []).forEach(function (item) {
+                    var name = (item.balanser || item.name || '').toLowerCase();
+                    if (!name) return;
+                    if (!ALLOWED_BALANSERS[name]) return;
+
+                    var url = SETTINGS.current_mirror + 'lite/' + name;
+                    url = _this.normalizeUrl(url);
+
+                    sources[name] = { name: item.name || name, url: url };
+
+                    source_items.push({
+                        title: sources[name].name,
+                        source: name,
+                        selected: false
+                    });
+                });
+            }
 
             if (!source_items.length) return this.showMessage('Нет доступных балансеров');
 
@@ -383,7 +410,7 @@
             var _this = this;
             var text = (str || '').trim();
 
-            // если вдруг прилетел JSON — не отдаём его в jQuery как "selector"
+            // если прилетел JSON — не даём jQuery воспринимать его как селектор
             if (text && (text[0] === '{' || text[0] === '[')) {
                 try {
                     var json = JSON.parse(text);
@@ -398,7 +425,6 @@
                 } catch (e) { }
             }
 
-            // принудительно как HTML
             var html = $('<div>' + (str || '') + '</div>');
             var content = html.find('.videos__item');
 
@@ -448,7 +474,7 @@
             log('Play URL:', data.url);
             log('Play Stream:', data.stream);
 
-            // 1) Прямая ссылка
+            // 1) прямая ссылка
             if (data.method === 'play' && data.url && (data.url.indexOf('.mp4') > -1 || data.url.indexOf('.m3u8') > -1)) {
                 var clean_url = _this.normalizeUrl(data.url);
 
@@ -467,7 +493,7 @@
                 return;
             }
 
-            // 2) call: video API сначала БЕЗ прокси
+            // 2) call: video API сначала БЕЗ прокси (как ты просил)
             if (data.method === 'call' || data.url || data.stream) {
                 Lampa.Loading.start(function () { Lampa.Loading.stop(); });
 
@@ -482,7 +508,7 @@
                 network.silent(api_url, function (response) {
                     _this._handleVideoApiResponse(response, data);
                 }, function () {
-                    // fallback через прокси (если CORS/503)
+                    // fallback через прокси (на случай CORS/503)
                     rotateProxy();
                     var px = _this.proxify(api_url);
 
