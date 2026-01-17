@@ -16,7 +16,6 @@
             voice: []
         };
         
-        // Актуальный список прокси
         var PROXIES = [
             'https://apn5.akter-black.com/',
             'https://apn10.akter-black.com/',
@@ -26,7 +25,6 @@
             'https://cors557.deno.dev/'
         ];
 
-        // Убрали online5
         var MIRRORS = [
             'http://online3.skaz.tv/',
             'http://online7.skaz.tv/',
@@ -58,17 +56,34 @@
             console.log('[SkazLite]', msg, data || '');
         }
 
-        // Выбор случайного прокси
         function rotateProxy() {
             SETTINGS.current_proxy = PROXIES[Math.floor(Math.random() * PROXIES.length)];
             log('Switched proxy to:', SETTINGS.current_proxy);
         }
 
-        // Обертка для URL через прокси
+        // Функция очистки ссылки от прокси (если он там случайно залип)
+        this.clearProxy = function(url) {
+            if (!url) return url;
+            // Перебираем все известные прокси и вырезаем их из начала строки
+            PROXIES.forEach(function(proxy) {
+                if (url.indexOf(proxy) === 0) {
+                    url = url.replace(proxy, '');
+                }
+            });
+            return url;
+        };
+
         this.proxify = function(url) {
-            // Не проксируем прямые файлы (mp4/m3u8), чтобы не нагружать прокси трафиком
-            if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) return url;
-            // Проксируем только http/https ссылки
+            if (!url) return '';
+            
+            // Если это файл видео - НИКОГДА не проксируем
+            if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) return this.clearProxy(url);
+            
+            // Если ссылка уже содержит наш текущий прокси или любой другой из списка - не оборачиваем снова
+            for (var i = 0; i < PROXIES.length; i++) {
+                if (url.indexOf(PROXIES[i]) === 0) return url;
+            }
+
             if (url.indexOf('http') !== 0) return url; 
             
             return SETTINGS.current_proxy + url;
@@ -77,9 +92,9 @@
         this.account = function(url) {
             if (!url) return url;
             
-            // Не добавляем параметры авторизации к файлам
+            // Если это видеофайл - чистим от прокси и не добавляем параметры
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) {
-                return url;
+                return this.clearProxy(url);
             }
 
             if (url.indexOf('account_email=') == -1) url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(SETTINGS.email));
@@ -314,20 +329,26 @@
         
         this.play = function(data) {
             var _this = this;
-            var url = _this.account(data.url);
             
+            // Получаем ссылку, чистим от всех прокси и лишних параметров
+            var url = _this.account(data.url);
+            url = _this.clearProxy(url);
+            
+            // Прямое воспроизведение БЕЗ ПРОКСИ
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) {
-                log('Playing direct video file:', url);
+                log('Playing direct video file (CLEAN):', url);
                 data.url = url; 
                 Lampa.Player.play(data);
                 Lampa.Player.playlist([data]); 
                 return;
             }
 
+            // Если это API-запрос, то его как раз надо проксировать
             Lampa.Loading.start(function() {
                 Lampa.Loading.stop();
             });
 
+            // Для API используем прокси, но тоже проверяем, чтобы не было дублей
             var resolve_url = _this.proxify(url);
             log('Resolving API link via proxy:', resolve_url);
 
@@ -335,8 +356,11 @@
                 Lampa.Loading.stop();
                 
                 if (json && json.url) {
-                    var clean_video_url = _this.account(json.url); 
-                    log('Video resolved from API:', clean_video_url);
+                    // Результат резолвинга (mp4/m3u8) снова чистим от прокси
+                    var clean_video_url = _this.clearProxy(json.url);
+                    clean_video_url = _this.account(clean_video_url); // Добавляем подпись, если нужно (но функция account для mp4 уже ничего не добавит)
+
+                    log('Video resolved (CLEAN):', clean_video_url);
                     
                     var video_data = {
                         title: data.title || json.title,
