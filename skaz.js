@@ -16,26 +16,42 @@
             voice: []
         };
         
-        // Убрали проблемный cors557
+        // РАСШИРЕННЫЙ список прокси (добавил резервные)
         var PROXIES = [
             'https://apn5.akter-black.com/',
             'https://apn10.akter-black.com/',
             'https://apn7.akter-black.com/',
             'https://apn6.akter-black.com/',
-            'https://apn2.akter-black.com/'
+            'https://apn2.akter-black.com/',
+            'https://apn1.akter-black.com/',
+            'https://apn3.akter-black.com/',
+            'https://apn4.akter-black.com/',
+            'https://apn8.akter-black.com/',
+            'https://apn9.akter-black.com/'
         ];
 
+        // РАСШИРЕННЫЙ список зеркал (добавил новые)
         var MIRRORS = [
             'http://online3.skaz.tv/',
             'http://online7.skaz.tv/',
-            'http://onlinecf3.skaz.tv/'
+            'http://onlinecf3.skaz.tv/',
+            'http://online1.skaz.tv/',
+            'http://online2.skaz.tv/',
+            'http://online4.skaz.tv/',
+            'http://online5.skaz.tv/',
+            'http://online6.skaz.tv/',
+            'http://online8.skaz.tv/',
+            'http://onlinecf1.skaz.tv/',
+            'http://onlinecf2.skaz.tv/'
         ];
 
         var SETTINGS = {
             email: 'aklama@mail.ru',
             uid: 'guest',
             current_mirror: MIRRORS[0],
-            current_proxy: PROXIES[0] 
+            current_proxy: PROXIES[0],
+            mirror_index: 0,
+            proxy_index: 0
         };
 
         var DEFAULT_BALANSERS = [
@@ -57,15 +73,14 @@
         }
 
         function rotateProxy() {
-            SETTINGS.current_proxy = PROXIES[Math.floor(Math.random() * PROXIES.length)];
+            SETTINGS.proxy_index = (SETTINGS.proxy_index + 1) % PROXIES.length;
+            SETTINGS.current_proxy = PROXIES[SETTINGS.proxy_index];
             log('Switched proxy to:', SETTINGS.current_proxy);
         }
 
-        // Агрессивная очистка от всех слоев прокси
         this.clearProxy = function(url) {
             if (!url) return '';
             var cleaned = false;
-            // Повторяем очистку, пока находим прокси в начале ссылки
             do {
                 cleaned = false;
                 for (var i = 0; i < PROXIES.length; i++) {
@@ -82,15 +97,12 @@
         this.proxify = function(url) {
             if (!url) return '';
             
-            // Если это файл видео - ВСЕГДА чистим и возвращаем оригинал
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) return this.clearProxy(url);
             
-            // Проверяем, не обернута ли ссылка уже (защита от дублей)
             for (var i = 0; i < PROXIES.length; i++) {
                 if (url.indexOf(PROXIES[i]) === 0) return url;
             }
 
-            // Проксируем только http ссылки, которые еще не проксированы
             if (url.indexOf('http') !== 0) return url; 
             
             return SETTINGS.current_proxy + url;
@@ -99,7 +111,6 @@
         this.account = function(url) {
             if (!url) return url;
             
-            // Если это видеофайл - чистим от прокси и не добавляем параметры
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) {
                 return this.clearProxy(url);
             }
@@ -160,7 +171,8 @@
             files.appendHead(filter.render());
             
             rotateProxy(); 
-            SETTINGS.current_mirror = MIRRORS[Math.floor(Math.random() * MIRRORS.length)];
+            SETTINGS.mirror_index = Math.floor(Math.random() * MIRRORS.length);
+            SETTINGS.current_mirror = MIRRORS[SETTINGS.mirror_index];
             
             this.start();
 
@@ -275,14 +287,16 @@
         };
         
         this.tryNextMirror = function() {
-            var current_idx = MIRRORS.indexOf(SETTINGS.current_mirror);
+            var current_idx = SETTINGS.mirror_index;
             var next_idx = (current_idx + 1) % MIRRORS.length;
             
+            // Если прошли все зеркала
             if (next_idx === 0) { 
-                this.showMessage('Ошибка сети. Все зеркала недоступны.<br>Попробуйте позже.');
+                this.showMessage('⚠️ Все зеркала недоступны.<br>Попробуйте позже или проверьте интернет.');
                 return;
             }
             
+            SETTINGS.mirror_index = next_idx;
             SETTINGS.current_mirror = MIRRORS[next_idx];
             log('Switching mirror to:', SETTINGS.current_mirror);
             
@@ -337,19 +351,15 @@
         this.play = function(data) {
             var _this = this;
             
-            // 1. Получаем базовый URL
             var url = _this.account(data.url);
-            
-            // 2. ЖЕСТКАЯ очистка от прокси перед проверкой типа
             url = _this.clearProxy(url);
             
-            // 3. Если это прямой файл -> играем СРАЗУ, без прокси
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) {
                 log('Playing direct video file (CLEAN):', url);
                 
                 var video_data = {
                     title: data.title,
-                    url: url, // Чистый URL!
+                    url: url,
                     quality: data.quality || {},
                     subtitles: data.subtitles || [],
                     timeline: data.timeline || {}
@@ -360,7 +370,6 @@
                 return;
             }
 
-            // 4. Если это API (не mp4/m3u8) -> тогда проксируем
             Lampa.Loading.start(function() {
                 Lampa.Loading.stop();
             });
@@ -372,17 +381,12 @@
                 Lampa.Loading.stop();
                 
                 if (json && json.url) {
-                    // 5. Результат резолвера тоже чистим
                     var clean_video_url = _this.clearProxy(json.url);
-                    // Добавляем аккаунт параметры, если нужно (обычно для mp4 не надо, но для m3u8 может пригодиться)
-                    // Но для надежности лучше просто чистый URL
                     
                     if (clean_video_url.indexOf('http') !== 0) {
-                        // Если ссылка относительная или кривая
                         clean_video_url = json.url; 
                     }
 
-                    // Еще раз чистим на всякий случай
                     clean_video_url = _this.clearProxy(clean_video_url);
 
                     log('Video resolved (CLEAN):', clean_video_url);
