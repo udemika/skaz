@@ -2,21 +2,40 @@
     'use strict';
 
     function SkazLite(object) {
-        var network = new Lampa.Reguest();
+        var Network = Lampa.Request || Lampa.Reguest;
+        var network = new Network();
+
         var scroll = new Lampa.Scroll({ mask: true, over: true });
         var files = new Lampa.Explorer(object);
         var filter = new Lampa.Filter(object);
 
+        var last_focus = null;
+
+        // ===== Состояния =====
         var sources = {};
-        var current_source = '';       // всегда без прокси
         var active_source_name = '';
 
-        var filter_items = {
+        // всегда храним БЕЗ прокси
+        var current_source = '';
+
+        var current_postid = null;
+
+        var current_season = 1;
+        var current_voice_idx = 0;
+        var voice_params = [];
+
+        var filter_translate = {
+            season: 'Сезон',
+            voice: 'Перевод'
+        };
+
+        var filter_find = {
             season: [],
             voice: []
         };
 
-        // прокси (cors557 удалён)
+        // ===== Прокси/зеркала =====
+        // cors557 убран
         var PROXIES = [
             'https://apn5.akter-black.com/',
             'https://apn10.akter-black.com/',
@@ -38,7 +57,7 @@
             current_proxy: PROXIES[0]
         };
 
-        // ======= ТОЛЬКО НУЖНЫЕ БАЛАНСЕРЫ =======
+        // ===== Только нужные балансеры (и whitelist) =====
         var DEFAULT_BALANSERS = [
             { name: 'VideoCDN', balanser: 'videocdn' },
             { name: 'Filmix', balanser: 'filmix' },
@@ -48,7 +67,6 @@
             { name: 'Rezka', balanser: 'rezka' }
         ];
 
-        // whitelist (на случай если events вернёт лишнее)
         var ALLOWED_BALANSERS = {
             videocdn: true,
             filmix: true,
@@ -71,12 +89,15 @@
         this.clearProxy = function (url) {
             if (!url) return '';
 
+            // удаляем префиксы прокси сколько угодно раз (лечит apn/apn/http...)
             var changed = true;
+
             while (changed) {
                 changed = false;
 
                 for (var i = 0; i < PROXIES.length; i++) {
                     var p = PROXIES[i];
+
                     if (url.indexOf(p) === 0) {
                         url = url.slice(p.length);
                         changed = true;
@@ -103,7 +124,7 @@
 
             var clean = this.normalizeUrl(url);
 
-            // не добавляем account_email/uid к прямым потокам
+            // к потокам не добавляем параметры
             if (clean.indexOf('.mp4') > -1 || clean.indexOf('.m3u8') > -1) {
                 return clean;
             }
@@ -146,56 +167,163 @@
             return base_url + (base_url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
         };
 
+        function buildBaseSourceUrl() {
+            // если выбрали похожий фильм/сериал — грузим по postid
+            if (current_postid) {
+                return SETTINGS.current_mirror + 'lite/' + active_source_name + '?rjson=False&postid=' + encodeURIComponent(current_postid);
+            }
+            return SETTINGS.current_mirror + 'lite/' + active_source_name;
+        }
+
+        // ============ UI HELPERS ============
+        function makeEpisodeCard(item) {
+            var seasonText = item.season ? ('Сезон ' + item.season) : '';
+            var episodeText = item.episode ? (item.episode + ' серия') : 'Серия';
+
+            var voiceText = item.voice ? item.voice : '';
+            var topLine = [];
+
+            if (active_source_name) topLine.push(active_source_name);
+            if (voiceText) topLine.push(voiceText);
+            if (seasonText) topLine.push(seasonText);
+            if (item.episode) topLine.push('Серия ' + item.episode);
+
+            var num = item.episode ? (item.episode < 10 ? '0' + item.episode : '' + item.episode) : '—';
+
+            var html =
+                '<div class="selector" style="' +
+                    'background: rgba(255,255,255,0.06);' +
+                    'border-radius: 0.6em;' +
+                    'padding: 1.1em 1.2em;' +
+                    'margin: 0.8em 0;' +
+                    'display:flex;' +
+                    'align-items:center;' +
+                    'min-height: 6.5em;' +
+                '">' +
+                    '<div style="' +
+                        'width: 6.2em;' +
+                        'text-align:center;' +
+                        'font-size: 2.6em;' +
+                        'letter-spacing: 0.05em;' +
+                        'opacity: 0.95;' +
+                        'flex-shrink:0;' +
+                    '">' + num + '</div>' +
+                    '<div style="flex-grow:1; padding-left: 0.8em;">' +
+                        '<div style="opacity:0.75; font-size:0.95em; margin-bottom:0.35em;">' + (topLine.join(' • ') || '') + '</div>' +
+                        '<div style="font-size: 1.7em; line-height:1.15; margin-bottom:0.25em;">' + episodeText + '</div>' +
+                        (voiceText ? '<div style="opacity:0.75; font-size: 1.05em;">' + voiceText + '</div>' : '') +
+                    '</div>' +
+                '</div>';
+
+            var $el = $(html);
+
+            $el.on('hover:enter', function () {
+                // data.url может прийти уже с прокси — нормализуем
+                var data = item.data || {};
+                if (data.url) data.url = plugin.normalizeUrl(data.url);
+                if (data.stream) data.stream = plugin.normalizeUrl(data.stream);
+
+                plugin.play(data);
+            });
+
+            $el.on('hover:focus', function (e) {
+                last_focus = e.target;
+                scroll.update(e.target, true);
+            });
+
+            return $el;
+        }
+
+        function makeSimilarCard(movie) {
+            var html =
+                '<div class="online-prestige selector" style="padding: 1em; display:flex; align-items:center; border-bottom: 1px solid rgba(255,255,255,0.06);">' +
+                    '<div style="width: 5em; height: 7.5em; margin-right: 1.2em; flex-shrink:0; background: rgba(255,255,255,0.06); border-radius: 0.4em; overflow:hidden; position:relative;"></div>' +
+                    '<div style="flex-grow:1;">' +
+                        '<div style="font-size: 1.2em; font-weight:500; margin-bottom: 0.35em;">' + (movie.title || '') + '</div>' +
+                        (movie.year ? '<div style="opacity:0.65; font-size: 0.95em;">' + movie.year + '</div>' : '') +
+                    '</div>' +
+                '</div>';
+
+            var $el = $(html);
+
+            var posterBox = $el.find('div').first();
+            if (movie.img) {
+                var img = $('<img style="width:100%; height:100%; object-fit:cover;">');
+                img.attr('src', movie.img);
+                img.on('error', function () {
+                    $(this).remove();
+                });
+                posterBox.append(img);
+            }
+
+            $el.on('hover:enter', function () {
+                if (!movie.postid) return;
+
+                current_postid = movie.postid;
+                current_season = 1;
+                current_voice_idx = 0;
+                filter_find.voice = [];
+                voice_params = [];
+
+                // грузим первый сезон/общую страницу по выбранному postid
+                plugin.loadSeason(current_season);
+            });
+
+            $el.on('hover:focus', function (e) {
+                last_focus = e.target;
+                scroll.update(e.target, true);
+            });
+
+            return $el;
+        }
+
         // ============ MAIN METHODS ============
+        var plugin = this;
+
         this.create = function () {
             var _this = this;
+
+            filter.onBack = function () {
+                Lampa.Activity.backward();
+            };
 
             filter.onSelect = function (type, a, b) {
                 if (type === 'sort') {
                     active_source_name = a.source;
                     Lampa.Storage.set('skaz_last_balanser', active_source_name);
 
-                    var base = SETTINGS.current_mirror + 'lite/' + active_source_name;
-                    current_source = _this.requestParams(base);
+                    // сбрасываем контентные фильтры
+                    current_postid = null;
+                    current_season = 1;
+                    current_voice_idx = 0;
+                    voice_params = [];
+                    filter_find.season = [];
+                    filter_find.voice = [];
 
-                    filter_items.season = [];
-                    filter_items.voice = [];
-
-                    _this.updateFilter();
-                    _this.find(false);
+                    _this.updateFilterMenu();
+                    _this.loadSeason(1);
                 }
                 else if (type === 'filter') {
-                    if (filter_items[a.stype] && filter_items[a.stype][b.index]) {
-                        var item = filter_items[a.stype][b.index];
+                    if (a.stype === 'season') {
+                        var sItem = filter_find.season[b.index];
+                        if (sItem) {
+                            current_season = sItem.season || 1;
+                            current_voice_idx = 0;
+                            filter_find.voice = [];
+                            voice_params = [];
 
-                        if (item.url) {
-                            current_source = _this.normalizeUrl(item.url);
-
-                            if (item.extra_params) {
-                                for (var key in item.extra_params) {
-                                    if (!item.extra_params.hasOwnProperty(key)) continue;
-                                    if (key === 'url' || key === 'method' || key === 'title') continue;
-
-                                    if (current_source.indexOf(key + '=') === -1) {
-                                        current_source = Lampa.Utils.addUrlComponent(
-                                            current_source,
-                                            key + '=' + encodeURIComponent(item.extra_params[key])
-                                        );
-                                    }
-                                }
-                            }
-
-                            current_source = _this.normalizeUrl(current_source);
-                            _this.find(false);
+                            _this.updateFilterMenu();
+                            _this.loadSeason(current_season);
                         }
-
-                        Lampa.Select.close();
                     }
-                }
-            };
+                    else if (a.stype === 'voice') {
+                        current_voice_idx = b.index;
+                        _this.updateFilterMenu();
+                        _this.loadVoice(voice_params[current_voice_idx]);
+                    }
 
-            filter.onBack = function () {
-                Lampa.Activity.backward();
+                    setTimeout(Lampa.Select.close, 10);
+                }
             };
 
             filter.render().find('.filter--sort span').text('Источник');
@@ -222,41 +350,43 @@
             Lampa.Controller.enable('content');
             scroll.body().append(Lampa.Template.get('lampac_content_loading'));
 
-            this.getIds().then(function () {
+            this.getIds(function () {
                 _this.loadBalansers();
             });
         };
 
-        this.getIds = function () {
+        this.getIds = function (cb) {
             var _this = this;
 
-            return new Promise(function (resolve) {
-                if (object.movie.kinopoisk_id || object.movie.imdb_id) return resolve();
+            // если уже есть imdb/kinopoisk — ок
+            if (object.movie.kinopoisk_id || object.movie.imdb_id) {
+                cb && cb();
+                return;
+            }
 
-                var url = SETTINGS.current_mirror + 'externalids?id=' + encodeURIComponent(object.movie.id);
-                url = _this.account(url);
+            var url = SETTINGS.current_mirror + 'externalids?id=' + encodeURIComponent(object.movie.id);
+            url = _this.account(url);
 
-                network.timeout(15000);
+            network.timeout(15000);
 
-                // сначала без прокси
-                network.silent(url, function (json) {
+            // сначала без прокси
+            network.silent(url, function (json) {
+                try {
+                    if (json && json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
+                    if (json && json.imdb_id) object.movie.imdb_id = json.imdb_id;
+                } catch (e) { }
+                cb && cb();
+            }, function () {
+                // fallback через прокси
+                rotateProxy();
+                network.silent(_this.proxify(url), function (json) {
                     try {
                         if (json && json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
                         if (json && json.imdb_id) object.movie.imdb_id = json.imdb_id;
                     } catch (e) { }
-                    resolve();
+                    cb && cb();
                 }, function () {
-                    // fallback через прокси
-                    rotateProxy();
-                    var px = _this.proxify(url);
-
-                    network.silent(px, function (json) {
-                        try {
-                            if (json && json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
-                            if (json && json.imdb_id) object.movie.imdb_id = json.imdb_id;
-                        } catch (e) { }
-                        resolve();
-                    }, resolve);
+                    cb && cb();
                 });
             });
         };
@@ -271,8 +401,11 @@
 
             // сначала без прокси
             network.silent(url, function (json) {
-                if (json && json.online && json.online.length) _this.buildSourceFilter(json.online);
-                else _this.buildSourceFilter(DEFAULT_BALANSERS);
+                if (json && json.online && json.online.length) {
+                    _this.buildSourceFilter(json.online);
+                } else {
+                    _this.buildSourceFilter(DEFAULT_BALANSERS);
+                }
             }, function () {
                 // fallback через прокси
                 rotateProxy();
@@ -294,8 +427,6 @@
             (online_list || []).forEach(function (item) {
                 var name = (item.balanser || item.name || '').toLowerCase();
                 if (!name) return;
-
-                // ======= ВАЖНО: режем всё лишнее, оставляем только whitelist =======
                 if (!ALLOWED_BALANSERS[name]) return;
 
                 var url = item.url || (SETTINGS.current_mirror + 'lite/' + name);
@@ -313,7 +444,7 @@
                 });
             });
 
-            // Если сервер вернул 0 из whitelist — используем дефолтные 6 балансеров
+            // если сервер не дал ни одного из whitelist — берём дефолтные 6
             if (!source_items.length) {
                 (DEFAULT_BALANSERS || []).forEach(function (item) {
                     var name = (item.balanser || item.name || '').toLowerCase();
@@ -333,55 +464,172 @@
                 });
             }
 
-            if (!source_items.length) return this.showMessage('Нет доступных балансеров');
+            if (!source_items.length) return _this.empty('Нет доступных балансеров');
 
             var last = Lampa.Storage.get('skaz_last_balanser', '');
-            var active = (source_items.filter(function (f) { return f.source === last; }).length) ? last : source_items[0].source;
+            var active = source_items[0].source;
 
-            source_items.forEach(function (f) { f.selected = (f.source === active); });
+            for (var i = 0; i < source_items.length; i++) {
+                if (source_items[i].source === last) {
+                    active = last;
+                    break;
+                }
+            }
+
+            for (var j = 0; j < source_items.length; j++) {
+                source_items[j].selected = (source_items[j].source === active);
+            }
 
             filter.set('sort', source_items);
             filter.chosen('sort', [sources[active].name]);
 
             active_source_name = active;
 
-            if (sources[active].url.indexOf('?') > -1) current_source = _this.normalizeUrl(sources[active].url);
-            else current_source = _this.requestParams(sources[active].url);
+            // сброс фильтров на старте
+            current_postid = null;
+            current_season = 1;
+            current_voice_idx = 0;
+            voice_params = [];
+            filter_find.season = [];
+            filter_find.voice = [];
 
-            this.find(false);
+            _this.updateFilterMenu();
+            _this.loadSeason(1);
         };
 
-        // use_proxy=false -> без прокси
-        this.find = function (use_proxy) {
+        // ====== Фильтр меню (как в swo.js) ======
+        this.updateFilterMenu = function () {
+            var select = [];
+
+            if (filter_find.season && filter_find.season.length) {
+                var seasonIdx = 0;
+
+                for (var i = 0; i < filter_find.season.length; i++) {
+                    if (filter_find.season[i].season === current_season) {
+                        seasonIdx = i;
+                        break;
+                    }
+                }
+
+                select.push({
+                    title: filter_translate.season,
+                    subtitle: filter_find.season[seasonIdx] ? filter_find.season[seasonIdx].title : 'Выбрать',
+                    items: (function () {
+                        var arr = [];
+                        for (var s = 0; s < filter_find.season.length; s++) {
+                            arr.push({
+                                title: filter_find.season[s].title,
+                                selected: s === seasonIdx,
+                                index: s
+                            });
+                        }
+                        return arr;
+                    })(),
+                    stype: 'season'
+                });
+            }
+
+            if (filter_find.voice && filter_find.voice.length) {
+                var voiceIdx = (current_voice_idx !== null && current_voice_idx !== undefined) ? current_voice_idx : 0;
+                if (voiceIdx >= filter_find.voice.length) voiceIdx = 0;
+
+                select.push({
+                    title: filter_translate.voice,
+                    subtitle: filter_find.voice[voiceIdx] ? filter_find.voice[voiceIdx].title : 'Выбрать',
+                    items: (function () {
+                        var arr = [];
+                        for (var v = 0; v < filter_find.voice.length; v++) {
+                            arr.push({
+                                title: filter_find.voice[v].title,
+                                selected: v === voiceIdx,
+                                index: v
+                            });
+                        }
+                        return arr;
+                    })(),
+                    stype: 'voice'
+                });
+            }
+
+            filter.set('filter', select);
+        };
+
+        // ====== Загрузка контента ======
+        this.loadSeason = function (seasonNum) {
+            var _this = this;
+
+            seasonNum = seasonNum || 1;
+            current_season = seasonNum;
+
+            scroll.clear();
+            scroll.body().append(Lampa.Template.get('lampac_content_loading'));
+            Lampa.Controller.enable('content');
+
+            var base = buildBaseSourceUrl();
+            var url = _this.requestParams(base, { s: seasonNum });
+
+            // текущий запрос храним без прокси
+            current_source = _this.normalizeUrl(url);
+
+            _this.requestContent(current_source, false, function (html) {
+                _this.parseInitial(html);
+            });
+        };
+
+        this.loadVoice = function (voiceParam) {
             var _this = this;
 
             scroll.clear();
             scroll.body().append(Lampa.Template.get('lampac_content_loading'));
+            Lampa.Controller.enable('content');
 
-            current_source = _this.normalizeUrl(current_source);
+            var base = buildBaseSourceUrl();
+            var extra = {};
 
-            var url = _this.account(current_source);
+            if (current_season) extra.s = current_season;
+            if (voiceParam !== undefined && voiceParam !== null) extra.t = voiceParam;
+
+            var url = _this.requestParams(base, extra);
+
+            current_source = _this.normalizeUrl(url);
+
+            _this.requestContent(current_source, false, function (html) {
+                _this.parseContent(html, true);
+            });
+        };
+
+        this.requestContent = function (url, use_proxy, onOk) {
+            var _this = this;
+
+            url = _this.normalizeUrl(url);
+            url = _this.account(url);
             url = _this.normalizeUrl(url);
 
-            var request_url = use_proxy ? _this.proxify(url) : url;
+            var requestUrl = use_proxy ? _this.proxify(url) : url;
 
             log('Requesting content:', url);
-            log('Via proxy:', use_proxy ? request_url : '(no proxy)');
+            log('Via proxy:', use_proxy ? requestUrl : '(no proxy)');
 
             network.native(
-                request_url,
-                function (str) { _this.parse(str); },
+                requestUrl,
+                function (str) {
+                    onOk && onOk(str);
+                },
                 function () {
                     // если пробовали без прокси — один fallback с прокси
                     if (!use_proxy) {
                         rotateProxy();
-                        setTimeout(function () { _this.find(true); }, 400);
+                        setTimeout(function () {
+                            _this.requestContent(url, true, onOk);
+                        }, 400);
                         return;
                     }
 
                     // если уже через прокси — меняем зеркало
                     rotateProxy();
-                    setTimeout(function () { _this.tryNextMirror(); }, 700);
+                    setTimeout(function () {
+                        _this.tryNextMirror();
+                    }, 700);
                 },
                 false,
                 { dataType: 'text' }
@@ -393,76 +641,265 @@
             var next_idx = (current_idx + 1) % MIRRORS.length;
 
             if (next_idx === 0) {
-                this.showMessage('Ошибка сети. Все зеркала недоступны.\n\nПопробуйте позже.');
+                this.empty('Ошибка сети. Все зеркала недоступны.\n\nПопробуйте позже.');
                 return;
             }
 
             SETTINGS.current_mirror = MIRRORS[next_idx];
             log('Switching mirror to:', SETTINGS.current_mirror);
 
-            var base = SETTINGS.current_mirror + 'lite/' + active_source_name;
-            current_source = this.requestParams(base);
-
-            this.find(false);
+            // перезагрузка текущего сезона
+            this.loadSeason(current_season || 1);
         };
 
-        this.parse = function (str) {
+        // ====== Парсинг (как в swo.js: похожие -> список выбора) ======
+        this.parseInitial = function (html) {
             var _this = this;
-            var text = (str || '').trim();
 
-            // если прилетел JSON — не даём jQuery воспринимать его как селектор
-            if (text && (text[0] === '{' || text[0] === '[')) {
-                try {
-                    var json = JSON.parse(text);
+            try {
+                var $dom = $('<div>' + (html || '') + '</div>');
 
-                    if (json && (json.rch || json.ws || json.nws || json.msg || json.accsdb)) {
-                        log('JSON response (not HTML), skip HTML parse:', json);
-                        if (json.msg) _this.showMessage(json.msg);
-                        rotateProxy();
-                        _this.tryNextMirror();
-                        return;
+                // проверка на "similar:true"
+                var firstItem = $dom.find('.videos__item').first();
+                if (firstItem && firstItem.length) {
+                    var dj = firstItem.attr('data-json') || '';
+                    if (dj) {
+                        try {
+                            var j = JSON.parse(dj);
+                            if (j && j.similar === true) {
+                                _this.parseSimilarMovies(html);
+                                return;
+                            }
+                        } catch (e) { }
                     }
-                } catch (e) { }
+                }
+
+                // сезоны (если есть)
+                _this.parseSeasonsFromDom($dom);
+
+                // если сезонов нет — сразу контент
+                _this.parseContent(html, false);
+            }
+            catch (e) {
+                _this.empty('Ошибка разбора данных');
+            }
+        };
+
+        this.parseSeasonsFromDom = function ($dom) {
+            // ищем сезоны
+            var seasons = [];
+            var seasonNodes = $dom.find('.videos__season-title, .videos__season');
+
+            seasonNodes.each(function () {
+                var $el = $(this);
+                var title = ($el.text() || '').trim();
+
+                var seasonNum = null;
+
+                // пробуем вытащить номер сезона из текста
+                var m = title.match(/(\d+)/);
+                if (m && m[1]) seasonNum = parseInt(m[1], 10);
+
+                // если не получилось — берём индексом
+                if (!seasonNum) seasonNum = seasons.length + 1;
+
+                seasons.push({
+                    title: title || ('Сезон ' + seasonNum),
+                    season: seasonNum
+                });
+            });
+
+            // если сервер не дал список сезонов — для сериалов хотя бы сезон 1
+            if (!seasons.length && object.movie && object.movie.name) {
+                seasons.push({ title: 'Сезон 1', season: 1 });
             }
 
-            var html = $('<div>' + (str || '') + '</div>');
-            var content = html.find('.videos__item');
+            filter_find.season = seasons;
 
-            this.parseFilters(html);
+            if (filter_find.season && filter_find.season.length) {
+                var found = false;
+                for (var i = 0; i < filter_find.season.length; i++) {
+                    if (filter_find.season[i].season === current_season) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) current_season = filter_find.season[0].season || 1;
+            }
 
-            scroll.clear();
+            this.updateFilterMenu();
+        };
 
-            if (content.length) {
-                content.each(function () {
-                    var element = $(this);
+        this.parseSimilarMovies = function (html) {
+            var _this = this;
 
-                    element.on('hover:enter', function () {
-                        var data = element.data('json') || {};
+            try {
+                var $dom = $('<div>' + (html || '') + '</div>');
+                var items = $dom.find('.videos__item');
 
-                        if (data.url) data.url = _this.normalizeUrl(data.url);
-                        if (data.stream) data.stream = _this.normalizeUrl(data.stream);
+                var movies = [];
 
-                        if (data.url) {
-                            if (data.method === 'play' || data.method === 'call') {
-                                _this.play(data);
-                            }
-                            else if (data.method === 'link') {
-                                current_source = _this.normalizeUrl(data.url);
-                                _this.find(false);
+                items.each(function () {
+                    try {
+                        var $item = $(this);
+                        var dj = $item.attr('data-json');
+                        if (!dj) return;
+
+                        var j = JSON.parse(dj);
+                        if (!j || j.similar !== true) return;
+
+                        var title = ($item.find('.videos__season-title').text() || $item.find('.videos__item-title').text() || '').trim();
+
+                        var postid = null;
+                        if (j.url) {
+                            var m = (j.url + '').match(/postid=([^&]+)/);
+                            if (m && m[1]) postid = m[1];
+                        }
+
+                        var kp = j.kinopoisk_id || j.kp_id || j.kinopoiskid || j.kpid;
+                        var img = '';
+
+                        if (kp) {
+                            img = 'https://st.kp.yandex.net/images/film_iphone/iphone360_' + kp + '.jpg';
+                        } else if (j.img || j.image) {
+                            img = (j.img || j.image);
+                            // если вдруг прислали "proxyimg...", попробуем вытащить http...
+                            if (img.indexOf('http') === -1 && img.indexOf('proxyimg') > -1) {
+                                var parts = img.split('http');
+                                if (parts.length > 1) img = 'http' + parts[1];
                             }
                         }
-                    });
 
-                    scroll.append(element);
+                        movies.push({
+                            title: title || (j.title || ''),
+                            year: j.year || '',
+                            postid: postid,
+                            img: img
+                        });
+                    } catch (e) { }
                 });
+
+                if (!movies.length) {
+                    _this.empty('Не удалось найти варианты по названию');
+                    return;
+                }
+
+                _this.showSimilarMoviesList(movies);
+            } catch (e) {
+                _this.empty('Ошибка разбора списка вариантов');
             }
-            else {
-                _this.showMessage('Пусто. Попробуйте другой источник или озвучку.');
+        };
+
+        this.showSimilarMoviesList = function (movies) {
+            scroll.clear();
+
+            var title = $('<div style="opacity:0.75; padding: 0.8em 0.2em 0.4em 0.2em;">Выберите вариант (год выпуска)</div>');
+            scroll.append(title);
+
+            for (var i = 0; i < movies.length; i++) {
+                scroll.append(makeSimilarCard(movies[i]));
             }
 
             Lampa.Controller.enable('content');
         };
 
+        // ====== Парсинг контента (серии/озвучки) ======
+        this.parseContent = function (html, keepVoices) {
+            var _this = this;
+
+            try {
+                var $dom = $('<div>' + (html || '') + '</div>');
+
+                // голоса/переводы
+                if (!keepVoices) {
+                    filter_find.voice = [];
+                    voice_params = [];
+
+                    var voiceButtons = $dom.find('.videos__button');
+                    voiceButtons.each(function () {
+                        try {
+                            var $btn = $(this);
+                            var title = ($btn.text() || '').trim();
+                            var dj = $btn.attr('data-json');
+                            if (!title || !dj) return;
+
+                            var j = JSON.parse(dj);
+                            if (!j || !j.url) return;
+
+                            // вытаскиваем t= из url
+                            var m = (j.url + '').match(/[?&]t=(\d+)/);
+                            if (!m || !m[1]) return;
+
+                            filter_find.voice.push({ title: title });
+                            voice_params.push(parseInt(m[1], 10));
+                        } catch (e) { }
+                    });
+
+                    if (filter_find.voice.length) {
+                        if (current_voice_idx === null || current_voice_idx === undefined) current_voice_idx = 0;
+                        if (current_voice_idx >= filter_find.voice.length) current_voice_idx = 0;
+                    }
+
+                    _this.updateFilterMenu();
+                }
+
+                // эпизоды
+                var episodes = [];
+                var epNodes = $dom.find('.videos__item');
+
+                epNodes.each(function () {
+                    try {
+                        var $it = $(this);
+                        var dj = $it.attr('data-json');
+                        if (!dj) return;
+
+                        var data = JSON.parse(dj);
+                        if (!data || !data.url) return;
+
+                        data.url = _this.normalizeUrl(data.url);
+                        if (data.stream) data.stream = _this.normalizeUrl(data.stream);
+
+                        var t = ($it.find('.videos__item-title').text() || '').trim();
+
+                        // атрибуты s/e встречаются у подобных источников (как в swo.js)
+                        var sAttr = parseInt($it.attr('s') || current_season || 0, 10) || current_season || 0;
+                        var eAttr = parseInt($it.attr('e') || 0, 10) || 0;
+
+                        episodes.push({
+                            title: t || ('Серия ' + eAttr),
+                            season: sAttr,
+                            episode: eAttr,
+                            voice: (filter_find.voice && filter_find.voice[current_voice_idx]) ? filter_find.voice[current_voice_idx].title : '',
+                            data: data
+                        });
+                    } catch (e) { }
+                });
+
+                scroll.clear();
+
+                if (!episodes.length) {
+                    _this.empty('Пусто. Попробуйте другой источник/перевод.');
+                    return;
+                }
+
+                // сортируем по номеру серии, если есть
+                episodes.sort(function (a, b) {
+                    return (a.episode || 0) - (b.episode || 0);
+                });
+
+                // рисуем как на скриншоте — большими карточками
+                for (var i = 0; i < episodes.length; i++) {
+                    scroll.append(makeEpisodeCard(episodes[i]));
+                }
+
+                Lampa.Controller.enable('content');
+            }
+            catch (e) {
+                _this.empty('Ошибка разбора серий');
+            }
+        };
+
+        // ====== Воспроизведение (video API: сначала без прокси) ======
         this.play = function (data) {
             var _this = this;
 
@@ -486,14 +923,12 @@
                     timeline: data.timeline || {}
                 };
 
-                log('Direct play final URL (no proxy):', clean_url);
-
                 Lampa.Player.play(video_data);
                 Lampa.Player.playlist([video_data]);
                 return;
             }
 
-            // 2) call: video API сначала БЕЗ прокси (как ты просил)
+            // 2) call: API ссылка ДОЛЖНА идти без прокси спереди, потом fallback
             if (data.method === 'call' || data.url || data.stream) {
                 Lampa.Loading.start(function () { Lampa.Loading.stop(); });
 
@@ -508,17 +943,14 @@
                 network.silent(api_url, function (response) {
                     _this._handleVideoApiResponse(response, data);
                 }, function () {
-                    // fallback через прокси (на случай CORS/503)
                     rotateProxy();
                     var px = _this.proxify(api_url);
-
                     log('Video API fallback (WITH PROXY):', px);
 
                     network.silent(px, function (response) {
                         _this._handleVideoApiResponse(response, data);
-                    }, function (err) {
+                    }, function () {
                         Lampa.Loading.stop();
-                        log('Network error when requesting video (no-proxy + proxy failed):', err);
                         Lampa.Noty.show('Ошибка сети при запросе видео. Попробуйте позже.');
                     });
                 });
@@ -532,7 +964,6 @@
         this._handleVideoApiResponse = function (response, original_data) {
             Lampa.Loading.stop();
 
-            log('API Response type:', typeof response);
             try { log('API Response:', JSON.stringify(response)); } catch (e) { }
 
             if (response && response.accsdb) {
@@ -556,9 +987,6 @@
                     timeline: response.timeline || {}
                 };
 
-                log('Final video URL (no proxy):', final_url);
-                log('Playing video:', video_data);
-
                 Lampa.Player.play(video_data);
                 Lampa.Player.playlist([video_data]);
                 return;
@@ -567,89 +995,15 @@
             Lampa.Noty.show('Сервер не вернул ссылку на видео. Попробуйте другой источник.');
         };
 
-        this.parseFilters = function (html) {
-            var _this = this;
-            var filters_found = false;
-
-            var seasons = html.find('.videos__season, .selector[data-type="season"]');
-            if (seasons.length) {
-                filter_items.season = [];
-                seasons.each(function () {
-                    var el = $(this);
-                    var data = el.data('json') || {};
-
-                    if (data.url) {
-                        data.url = _this.normalizeUrl(data.url);
-
-                        filter_items.season.push({
-                            title: el.text().trim(),
-                            url: data.url,
-                            extra_params: data,
-                            selected: el.hasClass('focused') || el.hasClass('active')
-                        });
-                    }
-                });
-                filters_found = true;
-            }
-
-            var voices = html.find('.videos__button, .selector[data-type="voice"]');
-            if (voices.length) {
-                filter_items.voice = [];
-                voices.each(function () {
-                    var el = $(this);
-                    var data = el.data('json') || {};
-
-                    if (data.url) {
-                        data.url = _this.normalizeUrl(data.url);
-
-                        filter_items.voice.push({
-                            title: el.text().trim(),
-                            url: data.url,
-                            extra_params: data,
-                            selected: el.hasClass('focused') || el.hasClass('active')
-                        });
-                    }
-                });
-                filters_found = true;
-            }
-
-            if (filters_found) this.updateFilter();
-        };
-
-        this.updateFilter = function () {
-            var items = [];
-
-            if (filter_items.season.length) {
-                var selS = filter_items.season.filter(function (f) { return f.selected; })[0];
-                items.push({
-                    title: 'Сезон',
-                    subtitle: (selS && selS.title) ? selS.title : 'Выбрать',
-                    stype: 'season',
-                    items: filter_items.season
-                });
-            }
-
-            if (filter_items.voice.length) {
-                var selV = filter_items.voice.filter(function (f) { return f.selected; })[0];
-                items.push({
-                    title: 'Перевод',
-                    subtitle: (selV && selV.title) ? selV.title : 'Выбрать',
-                    stype: 'voice',
-                    items: filter_items.voice
-                });
-            }
-
-            filter.set('filter', items);
-        };
-
-        this.showMessage = function (msg) {
-            scroll.clear();
-
+        this.empty = function (msg) {
             var html = Lampa.Template.get('lampac_does_not_answer', {});
-            html.find('.online-empty__title').html(msg);
+            html.find('.online-empty__title').text(msg || 'Пусто');
             html.find('.online-empty__buttons').remove();
 
+            scroll.clear();
             scroll.append(html);
+
+            Lampa.Controller.enable('content');
         };
 
         this.destroy = function () {
@@ -661,6 +1015,11 @@
             files = null;
             scroll = null;
             filter = null;
+
+            object = null;
+            sources = null;
+            filter_find = null;
+            voice_params = null;
         };
     }
 
