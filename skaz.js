@@ -16,7 +16,7 @@
             voice: []
         };
 
-        // cors557.deno.dev убран (по твоей просьбе)
+        // cors557.deno.dev убран
         var PROXIES = [
             'https://apn5.akter-black.com/',
             'https://apn10.akter-black.com/',
@@ -25,10 +25,10 @@
             'https://apn2.akter-black.com/'
         ];
 
+        // onlinecf3.skaz.tv удалён
         var MIRRORS = [
             'http://online3.skaz.tv/',
-            'http://online7.skaz.tv/',
-            'http://onlinecf3.skaz.tv/'
+            'http://online7.skaz.tv/'
         ];
 
         var SETTINGS = {
@@ -65,7 +65,6 @@
         this.clearProxy = function (url) {
             if (!url) return '';
 
-            // Удаляем префиксы прокси сколько угодно раз (лечит "двойной прокси")
             var changed = true;
             while (changed) {
                 changed = false;
@@ -90,7 +89,6 @@
             url = this.normalizeUrl(url);
             if (!url) return '';
 
-            // если не http/https — не трогаем
             if (url.indexOf('http') !== 0) return url;
 
             return SETTINGS.current_proxy + url;
@@ -99,14 +97,13 @@
         this.account = function (url) {
             if (!url) return url;
 
-            // account_email/uid добавляем только к API/страницам, не к mp4/m3u8
             var clean = this.normalizeUrl(url);
 
+            // account_email/uid не добавляем к прямым потокам
             if (clean.indexOf('.mp4') > -1 || clean.indexOf('.m3u8') > -1) {
                 return clean;
             }
 
-            // работаем с исходным url (мог быть без протокола и т.п.), но без прокси
             url = clean;
 
             if (url.indexOf('account_email=') === -1) {
@@ -161,7 +158,7 @@
                     filter_items.voice = [];
 
                     _this.updateFilter();
-                    _this.find(false); // сначала БЕЗ прокси
+                    _this.find(false);
                 }
                 else if (type === 'filter') {
                     if (filter_items[a.stype] && filter_items[a.stype][b.index]) {
@@ -185,7 +182,7 @@
                             }
 
                             current_source = _this.normalizeUrl(current_source);
-                            _this.find(false); // сначала БЕЗ прокси
+                            _this.find(false);
                         }
 
                         Lampa.Select.close();
@@ -235,8 +232,9 @@
                 var url = SETTINGS.current_mirror + 'externalids?id=' + encodeURIComponent(object.movie.id);
                 url = _this.account(url);
 
-                // сначала пробуем БЕЗ прокси
                 network.timeout(15000);
+
+                // сначала без прокси
                 network.silent(url, function (json) {
                     try {
                         if (json && json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
@@ -245,7 +243,9 @@
                     resolve();
                 }, function () {
                     // fallback через прокси
+                    rotateProxy();
                     var px = _this.proxify(url);
+
                     network.silent(px, function (json) {
                         try {
                             if (json && json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
@@ -265,7 +265,7 @@
 
             network.timeout(15000);
 
-            // сначала БЕЗ прокси
+            // сначала без прокси
             network.silent(url, function (json) {
                 if (json && json.online && json.online.length) _this.buildSourceFilter(json.online);
                 else _this.buildSourceFilter(DEFAULT_BALANSERS);
@@ -321,17 +321,16 @@
             if (sources[active].url.indexOf('?') > -1) current_source = _this.normalizeUrl(sources[active].url);
             else current_source = _this.requestParams(sources[active].url);
 
-            this.find(false); // сначала БЕЗ прокси
+            this.find(false);
         };
 
-        // use_proxy=false -> строго без прокси (как ты просишь)
+        // use_proxy=false -> без прокси
         this.find = function (use_proxy) {
             var _this = this;
 
             scroll.clear();
             scroll.body().append(Lampa.Template.get('lampac_content_loading'));
 
-            // current_source держим без прокси всегда
             current_source = _this.normalizeUrl(current_source);
 
             var url = _this.account(current_source);
@@ -344,24 +343,18 @@
 
             network.native(
                 request_url,
-                function (str) {
-                    _this.parse(str);
-                },
+                function (str) { _this.parse(str); },
                 function () {
-                    // 1) если пробовали без прокси — даём один fallback с прокси
+                    // если пробовали без прокси — один fallback с прокси
                     if (!use_proxy) {
                         rotateProxy();
-                        setTimeout(function () {
-                            _this.find(true);
-                        }, 400);
+                        setTimeout(function () { _this.find(true); }, 400);
                         return;
                     }
 
-                    // 2) если уже через прокси — меняем зеркало
+                    // если уже через прокси — меняем зеркало
                     rotateProxy();
-                    setTimeout(function () {
-                        _this.tryNextMirror();
-                    }, 700);
+                    setTimeout(function () { _this.tryNextMirror(); }, 700);
                 },
                 false,
                 { dataType: 'text' }
@@ -383,7 +376,7 @@
             var base = SETTINGS.current_mirror + 'lite/' + active_source_name;
             current_source = this.requestParams(base);
 
-            this.find(false); // снова начинаем без прокси
+            this.find(false);
         };
 
         this.parse = function (str) {
@@ -395,7 +388,6 @@
                 try {
                     var json = JSON.parse(text);
 
-                    // это не HTML-страница со списком, пропускаем
                     if (json && (json.rch || json.ws || json.nws || json.msg || json.accsdb)) {
                         log('JSON response (not HTML), skip HTML parse:', json);
                         if (json.msg) _this.showMessage(json.msg);
@@ -421,8 +413,6 @@
                     element.on('hover:enter', function () {
                         var data = element.data('json') || {};
 
-                        // ВАЖНО: чистим url/stream от возможного префикса прокси,
-                        // чтобы в логах/вызовах не было https://apn/.../https://apn/.../http...
                         if (data.url) data.url = _this.normalizeUrl(data.url);
                         if (data.stream) data.stream = _this.normalizeUrl(data.stream);
 
@@ -432,7 +422,7 @@
                             }
                             else if (data.method === 'link') {
                                 current_source = _this.normalizeUrl(data.url);
-                                _this.find(false); // сначала без прокси
+                                _this.find(false);
                             }
                         }
                     });
@@ -477,11 +467,10 @@
                 return;
             }
 
-            // 2) call: запрашиваем JSON video API
+            // 2) call: video API сначала БЕЗ прокси
             if (data.method === 'call' || data.url || data.stream) {
                 Lampa.Loading.start(function () { Lampa.Loading.stop(); });
 
-                // ВАЖНО: этот URL должен идти БЕЗ прокси спереди (как ты просишь)
                 var api_url = _this.normalizeUrl(data.url || data.stream || '');
                 api_url = _this.account(api_url);
                 api_url = _this.normalizeUrl(api_url);
@@ -490,14 +479,13 @@
 
                 network.timeout(20000);
 
-                // 2.1) пробуем без прокси
                 network.silent(api_url, function (response) {
                     _this._handleVideoApiResponse(response, data);
                 }, function () {
-                    // 2.2) fallback через прокси (на случай CORS/503), но сам "исходный" URL остаётся без прокси
+                    // fallback через прокси (если CORS/503)
                     rotateProxy();
-
                     var px = _this.proxify(api_url);
+
                     log('Video API fallback (WITH PROXY):', px);
 
                     network.silent(px, function (response) {
@@ -660,7 +648,7 @@
             if (e.type === 'complite') {
                 var btn = $(
                     '<div class="full-start__button selector view--online" data-subtitle="Skaz Lite">' +
-                        '<span>Skaz Lite</span>' +
+                    '<span>Skaz Lite</span>' +
                     '</div>'
                 );
 
