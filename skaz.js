@@ -361,7 +361,7 @@ log('Play method:', data.method);
 log('Play URL:', data.url);
 log('Play Stream:', data.stream);
 
-// ЕСЛИ ЭТО ПРЯМАЯ ССЫЛКА НА ВИДЕО (method: play и .mp4/.m3u8)
+// ============ ЕСЛИ ЭТО ПРЯМАЯ ССЫЛКА НА ВИДЕО (.mp4 или .m3u8) ============
 if (data.method === 'play' && data.url && (data.url.indexOf('.mp4') > -1 || data.url.indexOf('.m3u8') > -1)) {
 var clean_url = _this.clearProxy(data.url);
 log('Direct play URL (CLEAN):', clean_url);
@@ -379,7 +379,7 @@ Lampa.Player.playlist([video_data]);
 return;
 }
 
-// ЕСЛИ ЭТО ВТОРОЙ ШАГ (method: call) - запросить видео БЕЗ ПРОКСИ
+// ============ ЕСЛИ ЭТО ВТОРОЙ ШАГ (method: call) - ЗАПРОСИТЬ ВИДЕО ============
 if (data.method === 'call' || data.url) {
 Lampa.Loading.start(function() {
 Lampa.Loading.stop();
@@ -388,33 +388,44 @@ Lampa.Loading.stop();
 // Берём URL или STREAM для API запроса
 var api_url = data.url || data.stream;
 
-// ★ КРИТИЧНО: Очищаем от ВСЕХ прокси перед отправкой
+// ✓ ШАГИ ОБРАБОТКИ УРЛА:
+// 1. Очищаем от ВСЕХ прокси префиксов
 api_url = _this.clearProxy(api_url);
 
-log('Requesting video (NO PROXY):', api_url);
+// 2. Добавляем авторизацию (account_email и uid)
+api_url = _this.account(api_url);
 
-// ★ Отправляем БЕЗ прокси - это важно для Alloha и др.
+log('Requesting video API:', api_url);
+
+// 3. Отправляем БЕЗ прокси, но с авторизацией (это ОЧЕНЬ важно!)
 network.silent(api_url, function(response) {
 Lampa.Loading.stop();
 
 log('API Response type:', typeof response);
 log('API Response:', JSON.stringify(response));
 
-// Проверяем ошибку акаунта
+// ✗ Проверяем ошибку авторизации
 if (response && response.accsdb) {
-log('Account error - need login');
-Lampa.Noty.show('Требуется вход в аккаунт Skaz');
+log('Account error detected');
+Lampa.Noty.show('Ошибка аккаунта. Требуется авторизация на сайте Skaz');
 return;
 }
 
-// Ищем URL в ответе
+// ✗ Проверяем другие ошибки
+if (response && response.error) {
+log('API Error:', response.error);
+Lampa.Noty.show('Ошибка: ' + response.error);
+return;
+}
+
+// ✓ Нашли URL в ответе
 if (response && response.url) {
 var final_url = response.url;
 
-// Очищаем от прокси (на всякий случай)
+// Очищаем финальный URL от прокси (на всякий случай)
 final_url = _this.clearProxy(final_url);
 
-log('Final video URL (CLEAN):', final_url);
+log('Final video URL:', final_url);
 
 var video_data = {
 title: response.title || data.title || 'Видео',
@@ -424,27 +435,36 @@ subtitles: response.subtitles || [],
 timeline: response.timeline || {}
 };
 
+log('Playing video:', video_data);
+
 Lampa.Player.play(video_data);
 Lampa.Player.playlist([video_data]);
 
 } else {
-log('ERROR: No url in response!');
-log('Response keys:', response ? Object.keys(response) : 'null response');
-Lampa.Noty.show('Не удалось получить ссылку на видео');
+// ✗ Нет URL в ответе
+log('ERROR: No URL in response!');
+log('Response keys:', response ? Object.keys(response) : 'null');
+
+if (response) {
+log('Full response:', response);
+}
+
+Lampa.Noty.show('Сервер не вернул ссылку на видео. Попробуйте другой источник.');
 }
 
 }, function(err) {
+// ✗ Ошибка сети при запросе видео
 Lampa.Loading.stop();
-log('Network error:', err);
+log('Network error when requesting video:', err);
 rotateProxy();
-Lampa.Noty.show('Ошибка запроса видео');
+Lampa.Noty.show('Ошибка сети при запросе видео. Попробуйте позже.');
 });
 
 return;
 }
 
-// На случай если ничего не сработало
-log('Unknown video format');
+// ============ ЕСЛИ ФОРМАТ НЕ РАСПОЗНАН ============
+log('Unknown video format, data:', data);
 Lampa.Noty.show('Неизвестный формат видео');
 };
 
@@ -452,6 +472,7 @@ this.parseFilters = function(html) {
 var _this = this;
 var filters_found = false;
 
+// Ищем фильтры по сезонам
 var seasons = html.find('.videos__season, .selector[data-type="season"]');
 if (seasons.length) {
 filter_items.season = [];
@@ -470,6 +491,7 @@ selected: el.hasClass('focused') || el.hasClass('active')
 filters_found = true;
 }
 
+// Ищем фильтры по озвучкам
 var voices = html.find('.videos__button, .selector[data-type="voice"]');
 if (voices.length) {
 filter_items.voice = [];
