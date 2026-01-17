@@ -8,7 +8,7 @@
         var filter = new Lampa.Filter(object);
 
         var sources = {};
-        var current_source = '';
+        var current_source = '';       // ВСЕГДА хранится БЕЗ прокси
         var active_source_name = '';
 
         var filter_items = {
@@ -16,9 +16,8 @@
             voice: []
         };
 
-        // Лучше начинать с CORS-прокси, чтобы не ловить CORS-block в браузере
+        // cors557.deno.dev убран (по твоей просьбе)
         var PROXIES = [
-            'https://cors557.deno.dev/',
             'https://apn5.akter-black.com/',
             'https://apn10.akter-black.com/',
             'https://apn7.akter-black.com/',
@@ -62,19 +61,19 @@
             log('Switched proxy to:', SETTINGS.current_proxy);
         }
 
-        // ============ PROXY FUNCTIONS ============
+        // ============ URL/PROXY HELPERS ============
         this.clearProxy = function (url) {
             if (!url) return '';
 
-            // убираем все известные прокси сколько угодно раз (лечит "двойной прокси")
+            // Удаляем префиксы прокси сколько угодно раз (лечит "двойной прокси")
             var changed = true;
-
             while (changed) {
                 changed = false;
 
                 for (var i = 0; i < PROXIES.length; i++) {
-                    if (url.indexOf(PROXIES[i]) === 0) {
-                        url = url.slice(PROXIES[i].length);
+                    var p = PROXIES[i];
+                    if (url.indexOf(p) === 0) {
+                        url = url.slice(p.length);
                         changed = true;
                     }
                 }
@@ -83,28 +82,32 @@
             return url;
         };
 
-        this.proxify = function (url) {
-            if (!url) return '';
+        this.normalizeUrl = function (url) {
+            return this.clearProxy((url || '').toString().trim());
+        };
 
-            // всегда сначала чистим (это главное исправление против двойных префиксов)
-            url = this.clearProxy(url);
+        this.proxify = function (url) {
+            url = this.normalizeUrl(url);
+            if (!url) return '';
 
             // если не http/https — не трогаем
             if (url.indexOf('http') !== 0) return url;
 
-            // Добавляем прокси 1 раз
             return SETTINGS.current_proxy + url;
         };
 
         this.account = function (url) {
             if (!url) return url;
 
-            // добавляем account_email/uid только в запросы API/страниц, а не к m3u8/mp4
-            var clean = this.clearProxy(url);
+            // account_email/uid добавляем только к API/страницам, не к mp4/m3u8
+            var clean = this.normalizeUrl(url);
 
             if (clean.indexOf('.mp4') > -1 || clean.indexOf('.m3u8') > -1) {
                 return clean;
             }
+
+            // работаем с исходным url (мог быть без протокола и т.п.), но без прокси
+            url = clean;
 
             if (url.indexOf('account_email=') === -1) {
                 url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(SETTINGS.email));
@@ -118,6 +121,8 @@
         };
 
         this.requestParams = function (base_url, extra_params) {
+            base_url = this.normalizeUrl(base_url);
+
             var query = [];
 
             query.push('id=' + encodeURIComponent(object.movie.id));
@@ -156,14 +161,14 @@
                     filter_items.voice = [];
 
                     _this.updateFilter();
-                    _this.find();
+                    _this.find(false); // сначала БЕЗ прокси
                 }
                 else if (type === 'filter') {
                     if (filter_items[a.stype] && filter_items[a.stype][b.index]) {
                         var item = filter_items[a.stype][b.index];
 
                         if (item.url) {
-                            current_source = item.url;
+                            current_source = _this.normalizeUrl(item.url);
 
                             if (item.extra_params) {
                                 for (var key in item.extra_params) {
@@ -179,7 +184,8 @@
                                 }
                             }
 
-                            _this.find();
+                            current_source = _this.normalizeUrl(current_source);
+                            _this.find(false); // сначала БЕЗ прокси
                         }
 
                         Lampa.Select.close();
@@ -228,10 +234,9 @@
 
                 var url = SETTINGS.current_mirror + 'externalids?id=' + encodeURIComponent(object.movie.id);
                 url = _this.account(url);
-                url = _this.proxify(url);
 
+                // сначала пробуем БЕЗ прокси
                 network.timeout(15000);
-
                 network.silent(url, function (json) {
                     try {
                         if (json && json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
@@ -239,7 +244,15 @@
                     } catch (e) { }
                     resolve();
                 }, function () {
-                    resolve();
+                    // fallback через прокси
+                    var px = _this.proxify(url);
+                    network.silent(px, function (json) {
+                        try {
+                            if (json && json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
+                            if (json && json.imdb_id) object.movie.imdb_id = json.imdb_id;
+                        } catch (e) { }
+                        resolve();
+                    }, resolve);
                 });
             });
         };
@@ -249,15 +262,22 @@
 
             var url = this.requestParams(SETTINGS.current_mirror + 'lite/events?life=true');
             url = this.account(url);
-            url = this.proxify(url);
 
             network.timeout(15000);
 
+            // сначала БЕЗ прокси
             network.silent(url, function (json) {
                 if (json && json.online && json.online.length) _this.buildSourceFilter(json.online);
                 else _this.buildSourceFilter(DEFAULT_BALANSERS);
             }, function () {
-                _this.buildSourceFilter(DEFAULT_BALANSERS);
+                // fallback через прокси
+                rotateProxy();
+                network.silent(_this.proxify(url), function (json) {
+                    if (json && json.online && json.online.length) _this.buildSourceFilter(json.online);
+                    else _this.buildSourceFilter(DEFAULT_BALANSERS);
+                }, function () {
+                    _this.buildSourceFilter(DEFAULT_BALANSERS);
+                });
             });
         };
 
@@ -271,9 +291,12 @@
                 var name = (item.balanser || item.name || '').toLowerCase();
                 if (!name) return;
 
+                var url = item.url || (SETTINGS.current_mirror + 'lite/' + name);
+                url = _this.normalizeUrl(url);
+
                 sources[name] = {
                     name: item.name || name,
-                    url: item.url || (SETTINGS.current_mirror + 'lite/' + name)
+                    url: url
                 };
 
                 source_items.push({
@@ -288,41 +311,61 @@
             var last = Lampa.Storage.get('skaz_last_balanser', '');
             var active = (source_items.filter(function (f) { return f.source === last; }).length) ? last : source_items[0].source;
 
-            source_items.forEach(function (f) {
-                f.selected = (f.source === active);
-            });
+            source_items.forEach(function (f) { f.selected = (f.source === active); });
 
             filter.set('sort', source_items);
             filter.chosen('sort', [sources[active].name]);
 
             active_source_name = active;
 
-            if (sources[active].url.indexOf('?') > -1) current_source = sources[active].url;
+            if (sources[active].url.indexOf('?') > -1) current_source = _this.normalizeUrl(sources[active].url);
             else current_source = _this.requestParams(sources[active].url);
 
-            this.find();
+            this.find(false); // сначала БЕЗ прокси
         };
 
-        this.find = function () {
+        // use_proxy=false -> строго без прокси (как ты просишь)
+        this.find = function (use_proxy) {
             var _this = this;
 
             scroll.clear();
             scroll.body().append(Lampa.Template.get('lampac_content_loading'));
 
-            var url = this.account(current_source);
-            url = this.proxify(url);
+            // current_source держим без прокси всегда
+            current_source = _this.normalizeUrl(current_source);
 
-            log('Requesting content:', current_source);
-            log('Via proxy:', url);
+            var url = _this.account(current_source);
+            url = _this.normalizeUrl(url);
 
-            network.native(url, function (str) {
-                _this.parse(str);
-            }, function () {
-                rotateProxy();
-                setTimeout(function () {
-                    _this.tryNextMirror();
-                }, 700);
-            }, false, { dataType: 'text' });
+            var request_url = use_proxy ? _this.proxify(url) : url;
+
+            log('Requesting content:', url);
+            log('Via proxy:', use_proxy ? request_url : '(no proxy)');
+
+            network.native(
+                request_url,
+                function (str) {
+                    _this.parse(str);
+                },
+                function () {
+                    // 1) если пробовали без прокси — даём один fallback с прокси
+                    if (!use_proxy) {
+                        rotateProxy();
+                        setTimeout(function () {
+                            _this.find(true);
+                        }, 400);
+                        return;
+                    }
+
+                    // 2) если уже через прокси — меняем зеркало
+                    rotateProxy();
+                    setTimeout(function () {
+                        _this.tryNextMirror();
+                    }, 700);
+                },
+                false,
+                { dataType: 'text' }
+            );
         };
 
         this.tryNextMirror = function () {
@@ -340,37 +383,30 @@
             var base = SETTINGS.current_mirror + 'lite/' + active_source_name;
             current_source = this.requestParams(base);
 
-            this.find();
+            this.find(false); // снова начинаем без прокси
         };
 
-        // ======= FIX: безопасный parse() для JSON-ответов =======
         this.parse = function (str) {
             var _this = this;
-
             var text = (str || '').trim();
 
-            // Если сервер вернул JSON-конфиг/ответ — НЕ отдаём это в jQuery как селектор
+            // если вдруг прилетел JSON — не отдаём его в jQuery как "selector"
             if (text && (text[0] === '{' || text[0] === '[')) {
                 try {
                     var json = JSON.parse(text);
 
-                    // Частый кейс: {"rch":true,"ws":"...","nws":"..."} — это не HTML
+                    // это не HTML-страница со списком, пропускаем
                     if (json && (json.rch || json.ws || json.nws || json.msg || json.accsdb)) {
                         log('JSON response (not HTML), skip HTML parse:', json);
-
-                        // Если есть msg/ошибка — покажем пользователю
                         if (json.msg) _this.showMessage(json.msg);
-
                         rotateProxy();
                         _this.tryNextMirror();
                         return;
                     }
-                } catch (e) {
-                    // если JSON.parse упал — продолжим как HTML
-                }
+                } catch (e) { }
             }
 
-            // Принудительно оборачиваем, чтобы jQuery воспринимал как HTML, а не selector
+            // принудительно как HTML
             var html = $('<div>' + (str || '') + '</div>');
             var content = html.find('.videos__item');
 
@@ -383,15 +419,20 @@
                     var element = $(this);
 
                     element.on('hover:enter', function () {
-                        var data = element.data('json');
+                        var data = element.data('json') || {};
 
-                        if (data && data.url) {
+                        // ВАЖНО: чистим url/stream от возможного префикса прокси,
+                        // чтобы в логах/вызовах не было https://apn/.../https://apn/.../http...
+                        if (data.url) data.url = _this.normalizeUrl(data.url);
+                        if (data.stream) data.stream = _this.normalizeUrl(data.stream);
+
+                        if (data.url) {
                             if (data.method === 'play' || data.method === 'call') {
                                 _this.play(data);
                             }
                             else if (data.method === 'link') {
-                                current_source = data.url;
-                                _this.find();
+                                current_source = _this.normalizeUrl(data.url);
+                                _this.find(false); // сначала без прокси
                             }
                         }
                     });
@@ -409,88 +450,63 @@
         this.play = function (data) {
             var _this = this;
 
+            data = data || {};
+            if (data.url) data.url = _this.normalizeUrl(data.url);
+            if (data.stream) data.stream = _this.normalizeUrl(data.stream);
+
             log('Play method:', data.method);
             log('Play URL:', data.url);
             log('Play Stream:', data.stream);
 
-            // 1) Прямая ссылка на поток
+            // 1) Прямая ссылка
             if (data.method === 'play' && data.url && (data.url.indexOf('.mp4') > -1 || data.url.indexOf('.m3u8') > -1)) {
-                var clean_url = _this.clearProxy(data.url);
-                var final_url = clean_url; // для прямых ссылок оставляем чистую
+                var clean_url = _this.normalizeUrl(data.url);
 
                 var video_data = {
                     title: data.title || 'Видео',
-                    url: final_url,
+                    url: clean_url,
                     quality: data.quality || {},
                     subtitles: data.subtitles || [],
                     timeline: data.timeline || {}
                 };
 
-                log('Direct play final URL:', final_url);
+                log('Direct play final URL (no proxy):', clean_url);
 
                 Lampa.Player.play(video_data);
                 Lampa.Player.playlist([video_data]);
                 return;
             }
 
-            // 2) API-метод (call): получаем JSON с url/quality
+            // 2) call: запрашиваем JSON video API
             if (data.method === 'call' || data.url || data.stream) {
-                Lampa.Loading.start(function () {
-                    Lampa.Loading.stop();
-                });
+                Lampa.Loading.start(function () { Lampa.Loading.stop(); });
 
-                var api_url = data.url || data.stream || '';
-                api_url = _this.clearProxy(api_url);
+                // ВАЖНО: этот URL должен идти БЕЗ прокси спереди (как ты просишь)
+                var api_url = _this.normalizeUrl(data.url || data.stream || '');
                 api_url = _this.account(api_url);
-                api_url = _this.proxify(api_url);
+                api_url = _this.normalizeUrl(api_url);
 
-                log('Requesting video API (WITH PROXY):', api_url);
+                log('Requesting video API (NO PROXY):', api_url);
 
                 network.timeout(20000);
 
+                // 2.1) пробуем без прокси
                 network.silent(api_url, function (response) {
-                    Lampa.Loading.stop();
-
-                    log('API Response type:', typeof response);
-                    try { log('API Response:', JSON.stringify(response)); } catch (e) { }
-
-                    if (response && response.accsdb) {
-                        Lampa.Noty.show('Ошибка аккаунта. Требуется авторизация на сайте Skaz.');
-                        return;
-                    }
-
-                    if (response && response.error) {
-                        Lampa.Noty.show('Ошибка: ' + response.error);
-                        return;
-                    }
-
-                    if (response && response.url) {
-                        var final_url = _this.clearProxy(response.url);
-
-                        var video_data = {
-                            title: response.title || data.title || 'Видео',
-                            url: final_url,
-                            quality: response.quality || {},
-                            subtitles: response.subtitles || [],
-                            timeline: response.timeline || {}
-                        };
-
-                        log('Final video URL:', final_url);
-                        log('Playing video:', video_data);
-
-                        Lampa.Player.play(video_data);
-                        Lampa.Player.playlist([video_data]);
-                        return;
-                    }
-
-                    Lampa.Noty.show('Сервер не вернул ссылку на видео. Попробуйте другой источник.');
-                }, function (err) {
-                    Lampa.Loading.stop();
-
-                    log('Network error when requesting video:', err);
+                    _this._handleVideoApiResponse(response, data);
+                }, function () {
+                    // 2.2) fallback через прокси (на случай CORS/503), но сам "исходный" URL остаётся без прокси
                     rotateProxy();
 
-                    Lampa.Noty.show('Ошибка сети при запросе видео. Попробуйте позже.');
+                    var px = _this.proxify(api_url);
+                    log('Video API fallback (WITH PROXY):', px);
+
+                    network.silent(px, function (response) {
+                        _this._handleVideoApiResponse(response, data);
+                    }, function (err) {
+                        Lampa.Loading.stop();
+                        log('Network error when requesting video (no-proxy + proxy failed):', err);
+                        Lampa.Noty.show('Ошибка сети при запросе видео. Попробуйте позже.');
+                    });
                 });
 
                 return;
@@ -499,7 +515,46 @@
             Lampa.Noty.show('Неизвестный формат видео');
         };
 
+        this._handleVideoApiResponse = function (response, original_data) {
+            Lampa.Loading.stop();
+
+            log('API Response type:', typeof response);
+            try { log('API Response:', JSON.stringify(response)); } catch (e) { }
+
+            if (response && response.accsdb) {
+                Lampa.Noty.show('Ошибка аккаунта. Требуется авторизация на сайте Skaz.');
+                return;
+            }
+
+            if (response && response.error) {
+                Lampa.Noty.show('Ошибка: ' + response.error);
+                return;
+            }
+
+            if (response && response.url) {
+                var final_url = this.normalizeUrl(response.url);
+
+                var video_data = {
+                    title: response.title || (original_data && original_data.title) || 'Видео',
+                    url: final_url,
+                    quality: response.quality || {},
+                    subtitles: response.subtitles || [],
+                    timeline: response.timeline || {}
+                };
+
+                log('Final video URL (no proxy):', final_url);
+                log('Playing video:', video_data);
+
+                Lampa.Player.play(video_data);
+                Lampa.Player.playlist([video_data]);
+                return;
+            }
+
+            Lampa.Noty.show('Сервер не вернул ссылку на видео. Попробуйте другой источник.');
+        };
+
         this.parseFilters = function (html) {
+            var _this = this;
             var filters_found = false;
 
             var seasons = html.find('.videos__season, .selector[data-type="season"]');
@@ -507,9 +562,11 @@
                 filter_items.season = [];
                 seasons.each(function () {
                     var el = $(this);
-                    var data = el.data('json');
+                    var data = el.data('json') || {};
 
-                    if (data && data.url) {
+                    if (data.url) {
+                        data.url = _this.normalizeUrl(data.url);
+
                         filter_items.season.push({
                             title: el.text().trim(),
                             url: data.url,
@@ -526,9 +583,11 @@
                 filter_items.voice = [];
                 voices.each(function () {
                     var el = $(this);
-                    var data = el.data('json');
+                    var data = el.data('json') || {};
 
-                    if (data && data.url) {
+                    if (data.url) {
+                        data.url = _this.normalizeUrl(data.url);
+
                         filter_items.voice.push({
                             title: el.text().trim(),
                             url: data.url,
@@ -615,7 +674,6 @@
                     });
                 });
 
-                // добавляем кнопку в карточку (если контейнер есть)
                 try {
                     e.object.activity.render().find('.view--torrent').after(btn);
                 } catch (err) { }
