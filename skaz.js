@@ -16,7 +16,7 @@
             voice: []
         };
         
-        // --- АКТУАЛЬНЫЙ СПИСОК ПРОКСИ ---
+        // Актуальный список прокси
         var PROXIES = [
             'https://apn5.akter-black.com/',
             'https://apn10.akter-black.com/',
@@ -26,11 +26,11 @@
             'https://cors557.deno.dev/'
         ];
 
+        // Убрали online5
         var MIRRORS = [
             'http://online3.skaz.tv/',
             'http://online7.skaz.tv/',
-            'http://onlinecf3.skaz.tv/',
-            'http://online5.skaz.tv/'
+            'http://onlinecf3.skaz.tv/'
         ];
 
         var SETTINGS = {
@@ -66,7 +66,9 @@
 
         // Обертка для URL через прокси
         this.proxify = function(url) {
+            // Не проксируем прямые файлы (mp4/m3u8), чтобы не нагружать прокси трафиком
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) return url;
+            // Проксируем только http/https ссылки
             if (url.indexOf('http') !== 0) return url; 
             
             return SETTINGS.current_proxy + url;
@@ -75,6 +77,7 @@
         this.account = function(url) {
             if (!url) return url;
             
+            // Не добавляем параметры авторизации к файлам
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) {
                 return url;
             }
