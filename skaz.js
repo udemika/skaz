@@ -402,28 +402,26 @@
             });
         }
 
-        function loadSeason(seasonNum) {
-            current_season = seasonNum || 1;
+function loadSeason(seasonNum) {
+    current_season = seasonNum || 1;
 
-            var base = buildBaseSourceUrl();
+    var base = buildBaseSourceUrl();
 
-            // FIX: первый lite-запрос — строго как требуется сервером
-            var url;
-            if (!current_source && !current_postid) {
-                url = base
-                    + '?rjson=False'
-                    + '&title=' + encodeURIComponent(object.movie.title || object.movie.name || '')
-                    + '&lampac_unic_id=' + encodeURIComponent(LAMPAC_UNIC_ID);
-                url = plugin.account(url);
-            } else {
-                url = current_source ? current_source : plugin.requestParams(base, { s: current_season });
-            }
+    // если уже есть current_source (например после link) — используем его как основу
+    var url = current_source ? current_source : plugin.requestParams(base, { s: current_season });
 
-            // принудительно сохраним “текущую страницу”
-            current_source = plugin.normalizeUrl(url);
+    // 🔧 ВСТАВИТЬ ВОТ ЭТО (ТОЛЬКО ЭТО)
+    if (!current_source && !current_postid) {
+        url = url
+            + '&rjson=False'
+            + '&lampac_unic_id=' + LAMPAC_UNIC_ID;
+    }
 
-            loadByUrl(url);
-        }
+    // принудительно сохраним “текущую страницу”
+    current_source = plugin.normalizeUrl(url);
+
+    loadByUrl(url);
+}
 
         function loadVoice(voiceParam) {
             var base = buildBaseSourceUrl();
