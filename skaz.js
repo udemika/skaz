@@ -8,70 +8,6 @@
         var scroll = new Lampa.Scroll({ mask: true, over: true });
         var files  = new Lampa.Explorer(object);
 
-        // ===== PATCH: HEAD FILTER (SEASON / VOICE ONLY) =====
-        var head_filter = new Lampa.Filter(object);
-
-        function buildHeadButtons(){
-            var head = files.render().find('.explorer__files-head');
-            if(!head || !head.length) return;
-
-            // Avoid duplicates
-            if(head.find('.skaz-head-source').length) return;
-
-            // Источник (opens existing system Select)
-            var src_btn = $('<div class="head__action selector skaz-head-source"><span>Источник</span></div>');
-            src_btn.on('hover:enter', function(){
-                openSourceSelect();
-            });
-
-            // Фильтр (system Lampa.Filter: Season / Voice)
-            var flt_btn = $('<div class="head__action selector skaz-head-filter"><span>Фильтр</span></div>');
-            flt_btn.on('hover:enter', function(){
-                var select = [];
-
-                if(filter_find.season && filter_find.season.length){
-                    var sSel = (function(){
-                        for(var i=0;i<filter_find.season.length;i++) if(filter_find.season[i].selected) return filter_find.season[i];
-                        return filter_find.season[0];
-                    })();
-                    select.push({
-                        title: 'Сезон',
-                        subtitle: sSel ? sSel.title : '',
-                        items: filter_find.season.map(function(s,i){
-                            return { title: s.title, selected: !!s.selected, index: i };
-                        }),
-                        stype: 'season'
-                    });
-                }
-
-                if(filter_find.voice && filter_find.voice.length){
-                    var vSel = (function(){
-                        for(var j=0;j<filter_find.voice.length;j++) if(filter_find.voice[j].selected) return filter_find.voice[j];
-                        return filter_find.voice[0];
-                    })();
-                    select.push({
-                        title: 'Озвучка',
-                        subtitle: vSel ? vSel.title : '',
-                        items: filter_find.voice.map(function(v,i){
-                            return { title: v.title, selected: !!v.selected, index: i };
-                        }),
-                        stype: 'voice'
-                    });
-                }
-
-                head_filter.set('filter', select);
-                head_filter.show('Фильтр','filter');
-            });
-
-            head.append(src_btn).append(flt_btn);
-        }
-
-        head_filter.onSelect = function(type,a,b){
-            if(type !== 'filter') return;
-            if(a.stype === 'season') return openSeasonSelect();
-            if(a.stype === 'voice')  return openVoiceSelect();
-        };
-
         var last_focus = null;
 
         // ===== STATE =====
@@ -114,6 +50,16 @@
             current_mirror: MIRRORS[0],
             current_proxy: PROXIES[0]
         };
+
+        // ===== PATCH: lampac_unic_id =====
+        var LAMPAC_UNIC_ID = (function(){
+            try { return Lampa.Storage.get('lampac_unic_id') || (function(){
+                var id = Math.random().toString(36).slice(2,10);
+                Lampa.Storage.set('lampac_unic_id', id);
+                return id;
+            })(); } catch(e){ return Math.random().toString(36).slice(2,10); }
+        })();
+
 
         // ===== Только нужные балансеры (whitelist) =====
         var DEFAULT_BALANSERS = [
@@ -452,13 +398,29 @@
             });
         }
 
+        
         function loadSeason(seasonNum) {
             current_season = seasonNum || 1;
 
             var base = buildBaseSourceUrl();
 
-            // если уже есть current_source (например после link) — используем его как основу
-            var url = current_source ? current_source : plugin.requestParams(base, { s: current_season });
+            // PATCH: первый lite-запрос — БЕЗ id/imdb/kp, только title + rjson=False
+            var url;
+            if (!current_source && !current_postid) {
+                url = base
+                    + '?rjson=False'
+                    + '&title=' + encodeURIComponent(object.movie.title || object.movie.name || '')
+                    + '&lampac_unic_id=' + encodeURIComponent(LAMPAC_UNIC_ID);
+                url = plugin.account(url);
+            } else {
+                url = current_source ? current_source : plugin.requestParams(base, { s: current_season });
+            }
+
+            // принудительно сохраним “текущую страницу”
+            current_source = plugin.normalizeUrl(url);
+
+            loadByUrl(url);
+        }
 
             // принудительно сохраним “текущую страницу”
             current_source = plugin.normalizeUrl(url);
@@ -737,41 +699,7 @@
                     else Lampa.Controller.toggle('menu');
                 },
                 right: function () {
-                    // PATCH: open Filter (Season / Voice)
-                    var select = [];
-
-                    if(filter_find.season && filter_find.season.length){
-                        var sSel = (function(){
-                            for(var i=0;i<filter_find.season.length;i++) if(filter_find.season[i].selected) return filter_find.season[i];
-                            return filter_find.season[0];
-                        })();
-                        select.push({
-                            title: 'Сезон',
-                            subtitle: sSel ? sSel.title : '',
-                            items: filter_find.season.map(function(s,i){
-                                return { title: s.title, selected: !!s.selected, index: i };
-                            }),
-                            stype: 'season'
-                        });
-                    }
-
-                    if(filter_find.voice && filter_find.voice.length){
-                        var vSel = (function(){
-                            for(var j=0;j<filter_find.voice.length;j++) if(filter_find.voice[j].selected) return filter_find.voice[j];
-                            return filter_find.voice[0];
-                        })();
-                        select.push({
-                            title: 'Озвучка',
-                            subtitle: vSel ? vSel.title : '',
-                            items: filter_find.voice.map(function(v,i){
-                                return { title: v.title, selected: !!v.selected, index: i };
-                            }),
-                            stype: 'voice'
-                        });
-                    }
-
-                    head_filter.set('filter', select);
-                    head_filter.show('Фильтр','filter');
+                    openMainMenu();
                 },
                 up: function () {
                     if (Navigator.canmove('up')) Navigator.move('up');
@@ -793,9 +721,6 @@
             scroll.body().addClass('torrent-list');
             files.appendFiles(scroll.render());
             scroll.minus(files.render().find('.explorer__files-head'));
-
-            // PATCH: add head buttons
-            buildHeadButtons();
 
             rotateProxy();
             rotateMirror();
