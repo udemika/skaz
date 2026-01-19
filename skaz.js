@@ -51,13 +51,17 @@
             current_proxy: PROXIES[0]
         };
 
-        // ===== PATCH: lampac_unic_id =====
-        var LAMPAC_UNIC_ID = (function(){
-            try { return Lampa.Storage.get('lampac_unic_id') || (function(){
-                var id = Math.random().toString(36).slice(2,10);
+        // ===== FIX: lampac_unic_id (persistent) =====
+        var LAMPAC_UNIC_ID = (function () {
+            try {
+                var id = Lampa.Storage.get('lampac_unic_id');
+                if (id) return id;
+                id = Math.random().toString(36).slice(2, 10);
                 Lampa.Storage.set('lampac_unic_id', id);
                 return id;
-            })(); } catch(e){ return Math.random().toString(36).slice(2,10); }
+            } catch (e) {
+                return Math.random().toString(36).slice(2, 10);
+            }
         })();
 
 
@@ -398,13 +402,12 @@
             });
         }
 
-        
         function loadSeason(seasonNum) {
             current_season = seasonNum || 1;
 
             var base = buildBaseSourceUrl();
 
-            // PATCH: первый lite-запрос — БЕЗ id/imdb/kp, только title + rjson=False
+            // FIX: первый lite-запрос — строго как требуется сервером
             var url;
             if (!current_source && !current_postid) {
                 url = base
@@ -415,12 +418,6 @@
             } else {
                 url = current_source ? current_source : plugin.requestParams(base, { s: current_season });
             }
-
-            // принудительно сохраним “текущую страницу”
-            current_source = plugin.normalizeUrl(url);
-
-            loadByUrl(url);
-        }
 
             // принудительно сохраним “текущую страницу”
             current_source = plugin.normalizeUrl(url);
