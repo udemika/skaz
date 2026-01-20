@@ -38,7 +38,7 @@
 
         var MIRRORS = [
             'http://online3.skaz.tv/',
-            'http://online4.skaz.tv/'
+            'http://online7.skaz.tv/'
         ];
 
         var SETTINGS = {
@@ -111,6 +111,9 @@
 
             // прямые потоки не проксируем
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) return url;
+
+            // ИСКЛЮЧЕНИЕ: Запросы к API Alloha идут без прокси
+            if (url.indexOf('/lite/alloha/video') !== -1) return url;
 
             return SETTINGS.current_proxy + url;
         };
@@ -215,7 +218,7 @@
             var _this = this;
 
             filter.onBack = function() {
-                _this.start(); // или фокус на контент, если нужно
+                _this.start();
             };
 
             filter.onSelect = function(type, a, b) {
@@ -269,7 +272,6 @@
             files.appendHead(filter.render());
             scroll.minus(files.render().find('.explorer__files-head'));
             
-            // Загрузка
             rotateProxy();
             rotateMirror();
             
@@ -302,7 +304,6 @@
             // 2. Сезон
             if (filter_find.season.length > 0) {
                 var seasonIdx = 0;
-                // ищем выбранный
                 for(var i=0; i<filter_find.season.length; i++) {
                     if (filter_find.season[i].selected) {
                         seasonIdx = i;
@@ -323,7 +324,6 @@
             // 3. Озвучка
             if (filter_find.voice.length > 0) {
                 var voiceIdx = current_voice_idx !== null ? current_voice_idx : 0;
-                // подстраховка если индекс вышел за границы
                 if (voiceIdx >= filter_find.voice.length) voiceIdx = 0;
 
                 select.push({
@@ -416,7 +416,7 @@
 
             var html = $(str);
 
-            self.parseFilters(html); // обновит фильтры
+            self.parseFilters(html);
 
             var content = html.find('.videos__item');
             var list_items = [];
@@ -531,7 +531,6 @@
                 if (vSel) current_voice_idx = filter_find.voice.indexOf(vSel);
             }
 
-            // Обновляем правое меню
             this.updateFilterMenu();
         };
 
@@ -540,16 +539,9 @@
             var _this = this;
             
             items.forEach(function(element) {
-                var info_text = '';
-                if (element.type === 'play' && element.data) {
-                     // Можно добавить детали, если есть в json (quality и т.д.)
-                     // Для простоты берем title
-                }
-
                 var html = $('<div class="online-prestige selector">' +
                     '<div class="online-prestige__body">' +
                         '<div class="online-prestige__title">' + element.title + '</div>' +
-                        (info_text ? '<div class="online-prestige__info">' + info_text + '</div>' : '') +
                     '</div>' +
                 '</div>');
 
@@ -683,7 +675,6 @@
 
             Lampa.Controller.toggle('content');
             
-            // Если первичная загрузка еще не пошла (мало ли)
             if (!active_source_name && !scroll.render().find('.lampac-loading').length) {
                 scroll.clear();
                 scroll.body().append(Lampa.Template.get('lampac_content_loading'));
@@ -787,7 +778,6 @@
             }
             active_source_name = active;
             
-            // Выделяем активный
             for (var j = 0; j < source_items.length; j++) {
                 source_items[j].selected = (source_items[j].source === active_source_name);
             }
