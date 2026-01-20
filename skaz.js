@@ -232,12 +232,16 @@
                             // полный сброс
                             current_postid = null;
                             current_source = '';
-                            current_season = 1;
+                            current_season = null; // сброс на null
                             current_voice_idx = 0;
                             filter_find.season = [];
                             filter_find.voice = [];
                             
-                            loadSeason(1);
+                            // Загружаем без s=
+                            var base = buildBaseSourceUrl();
+                            var url = plugin.requestParams(base);
+                            current_source = plugin.normalizeUrl(url);
+                            loadByUrl(url);
                         }
                     } else if (a.stype == 'season') {
                         var it = filter_find.season[b.index];
@@ -785,13 +789,18 @@
             // сброс
             current_postid = null;
             current_source = '';
-            current_season = 1;
+            current_season = null; // Сброс
             current_voice_idx = 0;
             filter_find.season = [];
             filter_find.voice = [];
 
             this.updateFilterMenu();
-            loadSeason(1);
+            
+            // ВМЕСТО loadSeason(1) делаем запрос без параметров (без s=)
+            var base = buildBaseSourceUrl();
+            var url = plugin.requestParams(base); // Параметры фильма добавятся, но s= нет
+            current_source = plugin.normalizeUrl(url);
+            loadByUrl(url);
         };
 
         this.empty = function (msg) {
