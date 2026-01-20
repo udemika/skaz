@@ -38,6 +38,7 @@
 
         var MIRRORS = [
             'http://online4.skaz.tv/',
+            'http://online5.skaz.tv/',
             'http://online6.skaz.tv/'
         ];
 
@@ -229,7 +230,7 @@
                             active_source_name = picked.source;
                             Lampa.Storage.set('skaz_last_balanser', active_source_name);
 
-                            // полный сброс
+                            // полный сброс при смене источника
                             current_postid = null;
                             current_source = '';
                             current_season = null;
@@ -473,7 +474,12 @@
                              selected: false
                          };
                      });
-                     // Обновляем меню, чтобы кнопка появилась
+                     // Авто-выбор текущего сезона, если известен
+                     if (current_season) {
+                         filter_find.season.forEach(function(s){
+                             if(s.season == current_season) s.selected = true;
+                         });
+                     }
                      self.updateFilterMenu(); 
                  }
             }
@@ -490,8 +496,8 @@
         };
 
         this.parseFilters = function (html) {
-            // сезоны
-            filter_find.season = [];
+            // == СЕЗОНЫ ==
+            var found_seasons = [];
             var seasons = html.find('.videos__season, .selector[data-type="season"]');
 
             if (seasons && seasons.length) {
@@ -503,24 +509,37 @@
                     var m = txt.match(/(\d+)/);
                     var sn = m ? parseInt(m[1], 10) : null;
 
-                    filter_find.season.push({
+                    found_seasons.push({
                         title: txt || (sn ? ('Сезон ' + sn) : 'Сезон'),
                         season: sn,
                         url: data.url ? plugin.normalizeUrl(data.url) : null,
                         selected: el.hasClass('focused') || el.hasClass('active')
                     });
                 });
+            }
 
-                if (filter_find.season.length && !filter_find.season.some(function (s) { return s.selected; })) {
+            // Логика сохранения: если нашли новые - заменяем, если нет - оставляем старые
+            if (found_seasons.length > 0) {
+                filter_find.season = found_seasons;
+                // Если ни один не выбран, выбираем первый
+                if (!filter_find.season.some(function (s) { return s.selected; })) {
                     filter_find.season[0].selected = true;
                 }
-                
+                // Синхронизируем current_season
                 var sSel = null;
                 for (var i = 0; i < filter_find.season.length; i++) if (filter_find.season[i].selected) sSel = filter_find.season[i];
                 if (sSel && sSel.season) current_season = sSel.season;
+            } else {
+                // Ничего не нашли в HTML (например, мы в списке серий).
+                // Оставляем старый список filter_find.season, но обновляем selected
+                if (filter_find.season.length > 0) {
+                    filter_find.season.forEach(function(s) {
+                        s.selected = (s.season == current_season);
+                    });
+                }
             }
 
-            // озвучки
+            // == ОЗВУЧКИ ==
             filter_find.voice = [];
             var voices = html.find('.videos__button, .selector[data-type="voice"]');
 
