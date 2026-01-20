@@ -37,8 +37,8 @@
         ];
 
         var MIRRORS = [
-            'http://online4.skaz.tv/',
-            'http://online6.skaz.tv/'
+            'http://online3.skaz.tv/',
+            'http://online7.skaz.tv/'
         ];
 
         var SETTINGS = {
@@ -232,7 +232,7 @@
                             // полный сброс
                             current_postid = null;
                             current_source = '';
-                            current_season = null; // сброс на null
+                            current_season = null;
                             current_voice_idx = 0;
                             filter_find.season = [];
                             filter_find.voice = [];
@@ -456,6 +456,26 @@
                         return;
                     }
                 });
+            }
+
+            // ЕСЛИ фильтр сезонов пуст, но в списке есть папки-сезоны (type: link),
+            // то заполняем меню "Фильтр" этими элементами
+            if (filter_find.season.length === 0 && list_items.length > 0) {
+                 var links = list_items.filter(function(i){ return i.type === 'link'; });
+                 if (links.length > 0) {
+                     filter_find.season = links.map(function(item) {
+                         var m = item.title.match(/(\d+)/);
+                         var sn = m ? parseInt(m[1], 10) : null;
+                         return {
+                             title: item.title,
+                             season: sn,
+                             url: item.url,
+                             selected: false
+                         };
+                     });
+                     // Обновляем меню, чтобы кнопка появилась
+                     self.updateFilterMenu(); 
+                 }
             }
 
             scroll.clear();
