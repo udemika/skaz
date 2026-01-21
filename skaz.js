@@ -56,6 +56,7 @@
             { name: 'VideoCDN', balanser: 'videocdn' },
             { name: 'Filmix', balanser: 'filmix' },
             { name: 'kinopub', balanser: 'kinopub' },
+            { name: 'kinobase', balanser: 'kinobase' },
             { name: 'Alloha', balanser: 'alloha' },
             { name: 'RHS Premium', balanser: 'rhsprem' },
             { name: 'Rezka', balanser: 'rezka' }
@@ -65,6 +66,7 @@
             videocdn: true,
             filmix: true,
             kinopub: true,
+            kinobase: true,
             alloha: true,
             rhsprem: true,
             rezka: true
