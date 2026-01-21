@@ -36,7 +36,6 @@
             'https://apn2.akter-black.com/'
         ];
 
-        // Добавил online3 и online7, как просили
         var MIRRORS = [
             'http://online4.skaz.tv/',
             'http://online5.skaz.tv/',
@@ -174,52 +173,52 @@
             }
         }
 
-        // ========= HTML REQUEST (ЖЕСТКИЙ ПЕРЕБОР ВСЕХ СЕРВЕРОВ) =========
+        // ========= HTML REQUEST (ИСПРАВЛЕН ПЕРЕБОР СЕРВЕРОВ) =========
         this.requestHtml = function (url, onOk, onFail) {
             var self = this;
-            var original_url = self.normalizeUrl(url);
-
-            // Функция запускает цепочку перебора
-            function tryNextMirror(index) {
-                // Если перебрали все зеркала - сдаёмся
+            
+            // Получаем "чистый" путь без домена, чтобы подставлять разные зеркала
+            var relative_path = self.normalizeUrl(url);
+            
+            // Удаляем возможные домены из начала строки
+            MIRRORS.forEach(function(m) {
+                 if(relative_path.indexOf(m) === 0) relative_path = relative_path.replace(m, '');
+            });
+            // Страховка для старых ссылок
+            relative_path = relative_path.replace(/^http:\/\/online[^/]+\.skaz\.tv\//, '');
+            
+            function tryMirror(index) {
                 if (index >= MIRRORS.length) {
                     onFail && onFail();
                     return;
                 }
 
-                // Устанавливаем текущее зеркало и прокси
                 SETTINGS.current_mirror = MIRRORS[index];
                 
-                // Чтобы избежать кеширования прокси-сервером, можно каждый раз менять прокси
-                rotateProxy(); 
-
-                // Формируем URL: заменяем домен старого зеркала на текущий
-                var current_attempt_url = original_url.replace(/^http:\/\/online[^/]+\.skaz\.tv\//, SETTINGS.current_mirror);
+                // Формируем полный URL с текущим зеркалом
+                var target_url = SETTINGS.current_mirror + relative_path;
+                target_url = self.account(target_url);
                 
-                // Добавляем аккаунт
-                current_attempt_url = self.account(current_attempt_url);
-                
-                // Оборачиваем в прокси
-                var proxied = self.proxify(current_attempt_url);
+                // Меняем прокси для надежности
+                rotateProxy();
+                var proxied = self.proxify(target_url);
 
-                network.timeout(10000); // Чуть уменьшил таймаут, чтобы быстрее перебирал
+                network.timeout(10000);
 
                 network.native(proxied, function (str) {
-                    // Если пришел пустой ответ — считаем ошибкой и идем дальше
-                    if (!str) {
-                        tryNextMirror(index + 1);
+                    // Если ответ пустой или содержит ошибку авторизации - пробуем следующее зеркало
+                    if (!str || str.indexOf('Авторизация не удалась') !== -1) {
+                         tryMirror(index + 1);
                     } else {
-                        // Успех
                         onOk && onOk(str);
                     }
                 }, function () {
-                    // Ошибка сети — сразу пробуем следующее зеркало
-                    tryNextMirror(index + 1);
+                    // Ошибка сети - пробуем следующее зеркало
+                    tryMirror(index + 1);
                 }, false, { dataType: 'text' });
             }
 
-            // Начинаем с первого зеркала в списке (индекс 0)
-            tryNextMirror(0);
+            tryMirror(0);
         };
 
         // ========= UI: INIT & FILTER =========
@@ -246,7 +245,7 @@
                             filter_find.season = [];
                             filter_find.voice = [];
                             
-                            // Загружаем с использованием новой логики перебора
+                            // Загружаем без s=
                             var base = buildBaseSourceUrl();
                             var url = plugin.requestParams(base);
                             current_source = plugin.normalizeUrl(url);
@@ -284,6 +283,9 @@
             files.appendFiles(scroll.render());
             files.appendHead(filter.render());
             scroll.minus(files.render().find('.explorer__files-head'));
+            
+            rotateProxy();
+            rotateMirror();
             
             this.start();
         };
@@ -418,8 +420,8 @@
             try {
                 var j = JSON.parse(str);
                 if (j && (j.accsdb || j.msg)) {
-                    // Ошибка от сервера - пробуем вывести пустой экран, 
-                    // ретрай здесь делать не будем, т.к. сервер ответил
+                    rotateProxy();
+                    rotateMirror();
                     return self.empty('Ошибка ответа сервера');
                 }
             } catch (e) {}
@@ -752,48 +754,46 @@
                 } catch (e) {}
                 cb && cb();
             }, function () {
-                // Если не удалось получить ID, просто продолжаем работу
-                cb && cb();
+                rotateProxy();
+                network.silent(self.proxify(url), function (json) {
+                    try {
+                        if (json && json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
+                        if (json && json.imdb_id) object.movie.imdb_id = json.imdb_id;
+                    } catch (e) {}
+                    cb && cb();
+                }, function () {
+                    cb && cb();
+                });
             });
         };
 
-        // Перебор серверов при старте плагина
         this.loadBalansers = function () {
             var self = this;
             
-            // Рекурсивный перебор зеркал
-            function tryNextMirror(index) {
+            function tryMirror(index) {
                 if (index >= MIRRORS.length) {
-                    // Все зеркала недоступны - грузим дефолтный список
                     self.buildSourceFilter(DEFAULT_BALANSERS);
                     return;
                 }
 
                 SETTINGS.current_mirror = MIRRORS[index];
                 
-                // Для надежности при каждом запросе списка балансеров можно менять прокси
-                rotateProxy();
-                
                 var url = self.requestParams(SETTINGS.current_mirror + 'lite/events?life=true');
                 url = self.account(url);
-                var proxied = self.proxify(url);
                 
-                network.timeout(10000);
+                network.timeout(15000);
+                
+                rotateProxy();
 
-                network.silent(proxied, function (json) {
-                    if (json && json.online && json.online.length) {
-                        self.buildSourceFilter(json.online);
-                    } else {
-                        // Ответ есть, но пустой или некорректный -> пробуем следующее зеркало
-                        tryNextMirror(index + 1);
-                    }
+                network.silent(self.proxify(url), function (json) {
+                    if (json && json.online && json.online.length) self.buildSourceFilter(json.online);
+                    else tryMirror(index + 1);
                 }, function () {
-                    // Ошибка сети -> следующее зеркало
-                    tryNextMirror(index + 1);
+                    tryMirror(index + 1);
                 });
             }
-
-            tryNextMirror(0);
+            
+            tryMirror(0);
         };
 
         this.buildSourceFilter = function (online_list) {
@@ -852,7 +852,6 @@
             this.updateFilterMenu();
             
             // ВМЕСТО loadSeason(1) делаем запрос без параметров (без s=)
-            // Это запустит requestHtml и его цепочку перебора зеркал
             var base = buildBaseSourceUrl();
             var url = plugin.requestParams(base); // Параметры фильма добавятся, но s= нет
             current_source = plugin.normalizeUrl(url);
