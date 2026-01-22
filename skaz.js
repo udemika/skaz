@@ -45,8 +45,8 @@
         ];
 
         var SETTINGS = {
-            email: 'aklamarrrr',
-            uid: '8888',
+            email: 'akzama@mail.ru',
+            uid: 'guest',
             current_mirror: MIRRORS[0],
             current_proxy: PROXIES[0]
         };
