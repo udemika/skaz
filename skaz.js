@@ -133,7 +133,7 @@
                 } else if (bName === 'rezka') {
                     return current_ab_mirror_rezka;
                 } else if (bName === 'alloha') {
-                    // Alloha остается на ab2024.ru, как и просили
+                    // Alloha: используем ab2024.ru
                     return 'https://ab2024.ru/'; 
                 } else if (bName === 'filmix' || bName === 'kinopub' || bName === 'rhsprem') {
                     return current_ab_mirror_main;
@@ -172,15 +172,30 @@
             url = this.normalizeUrl(url);
             if (!url) return '';
             
-            // Если выбран источник ab2024 - НЕ используем стандартные прокси
-            if (connection_source === 'ab2024') return url;
+            // ЛОГИКА ДЛЯ AB2024
+            if (connection_source === 'ab2024') {
+                // Если запрос к Alloha
+                if (url.indexOf('/lite/alloha') !== -1) {
+                    // Исключение: получение видео-ссылки -> БЕЗ ПРОКСИ
+                    if (url.indexOf('/lite/alloha/video') !== -1) {
+                        return url;
+                    }
+                    // Все остальные запросы Alloha (списки) -> ЧЕРЕЗ ПРОКСИ
+                    return SETTINGS.current_proxy + url;
+                }
+                
+                // Для всех остальных балансеров в режиме ab2024 (VideoCDN, Filmix, Rezka) -> БЕЗ ПРОКСИ
+                // (так как они идут на lam зеркала напрямую)
+                return url;
+            }
 
+            // ЛОГИКА ДЛЯ SKAZ (стандартная)
             if (url.indexOf('http') !== 0) return url;
 
             // прямые потоки не проксируем
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) return url;
 
-            // ИСКЛЮЧЕНИЕ: Запросы к API Alloha идут без прокси
+            // ИСКЛЮЧЕНИЕ: Запросы к API Alloha идут без прокси (для Skaz режима)
             if (url.indexOf('/lite/alloha/video') !== -1) return url;
 
             return SETTINGS.current_proxy + url;
@@ -261,7 +276,7 @@
             url = self.normalizeUrl(url);
             url = self.account(url); 
 
-            // 1) сначала через прокси (иначе часто CORS)
+            // 1) сначала через прокси (или без, в зависимости от proxify)
             var proxied = self.proxify(url);
 
             network.timeout(15000);
