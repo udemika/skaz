@@ -45,13 +45,25 @@
             'http://online6.skaz.tv/'
         ];
 
-        // Новые зеркала для ab2024
-        var MIRRORS_AB = [
+        // === ГРУППЫ СЕРВЕРОВ AB2024 ===
+        // Videocdn
+        var AB_POOL_1 = [
             'https://lam5.akter-black.com/',
+            'https://lam9.akter-black.com/'
+        ];
+        // Filmix, Alloha, Kinopub, RHSprem
+        var AB_POOL_2 = [
             'https://lam7.akter-black.com/',
-            'https://lam9.akter-black.com/',
             'https://lam10.akter-black.com/'
         ];
+        // Rezka
+        var AB_POOL_3 = [
+            'http://z01.online/'
+        ];
+
+        // === ТОКЕНЫ AB2024 ===
+        var AB_TOKENS = ['мар.31', 'KOSMOS%85'];
+        var current_ab_token_index = 0;
 
         var SETTINGS = {
             email: 'aklama@mail.ru',
@@ -60,7 +72,10 @@
             current_proxy: PROXIES[0]
         };
         
-        var current_mirror_ab = MIRRORS_AB[0];
+        // Текущие активные зеркала для каждой группы AB
+        var current_ab_mirror_vcdn = AB_POOL_1[0];
+        var current_ab_mirror_main = AB_POOL_2[0];
+        var current_ab_mirror_rezka = AB_POOL_3[0];
 
         // ===== Только нужные балансеры (whitelist) =====
         var DEFAULT_BALANSERS = [
@@ -90,15 +105,42 @@
             log('Switched proxy to:', SETTINGS.current_proxy);
         }
 
+        function rotateToken() {
+            current_ab_token_index++;
+            if (current_ab_token_index >= AB_TOKENS.length) current_ab_token_index = 0;
+            log('Switched AB token to:', AB_TOKENS[current_ab_token_index]);
+        }
+
         function rotateMirror() {
+            // Ротация Skaz
             SETTINGS.current_mirror = MIRRORS_SKAZ[Math.floor(Math.random() * MIRRORS_SKAZ.length)];
-            current_mirror_ab = MIRRORS_AB[Math.floor(Math.random() * MIRRORS_AB.length)];
-            log('Switched mirror to:', SETTINGS.current_mirror, current_mirror_ab);
+            
+            // Ротация AB2024 (внутри групп)
+            current_ab_mirror_vcdn = AB_POOL_1[Math.floor(Math.random() * AB_POOL_1.length)];
+            current_ab_mirror_main = AB_POOL_2[Math.floor(Math.random() * AB_POOL_2.length)];
+            current_ab_mirror_rezka = AB_POOL_3[Math.floor(Math.random() * AB_POOL_3.length)]; // тут всего один, но для логики оставим
+            
+            log('Mirrors rotated');
         }
         
-        // Получение текущего базового хоста в зависимости от выбора
-        function getHost() {
-            return connection_source === 'ab2024' ? current_mirror_ab : SETTINGS.current_mirror;
+        // Получение хоста в зависимости от источника и конкретного балансера
+        function getHost(balanserName) {
+            if (connection_source === 'ab2024') {
+                var bName = (balanserName || active_source_name || '').toLowerCase();
+
+                if (bName === 'videocdn') {
+                    return current_ab_mirror_vcdn;
+                } else if (bName === 'rezka') {
+                    return current_ab_mirror_rezka;
+                } else if (bName === 'filmix' || bName === 'alloha' || bName === 'kinopub' || bName === 'rhsprem') {
+                    return current_ab_mirror_main;
+                } else {
+                    // Для служебных запросов (loadBalansers, getIds) используем пул main (lam7/lam10)
+                    return current_ab_mirror_main; 
+                }
+            } else {
+                return SETTINGS.current_mirror;
+            }
         }
 
         // ========= URL HELPERS =========
@@ -128,7 +170,7 @@
             url = this.normalizeUrl(url);
             if (!url) return '';
             
-            // Если выбран источник ab2024 - НЕ используем стандартные прокси, идем напрямую на lamX
+            // Если выбран источник ab2024 - НЕ используем стандартные прокси
             if (connection_source === 'ab2024') return url;
 
             if (url.indexOf('http') !== 0) return url;
@@ -136,7 +178,7 @@
             // прямые потоки не проксируем
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) return url;
 
-            // ИСКЛЮЧЕНИЕ: Запросы к API Alloha идут без прокси
+            // ИСКЛЮЧЕНИЕ: Запросы к API Alloha идут без прокси (для старого режима)
             if (url.indexOf('/lite/alloha/video') !== -1) return url;
 
             return SETTINGS.current_proxy + url;
@@ -157,9 +199,22 @@
                 if (url.indexOf('uid=') === -1) {
                     url = Lampa.Utils.addUrlComponent(url, 'uid=4ezu837o');
                 }
+                
+                // Удаляем старый токен если есть, чтобы подставить актуальный (для ротации)
+                // Но Lampa.Utils.addUrlComponent просто добавляет. 
+                // Если токен уже вшит в URL, ротация не сработает корректно при ретрае, 
+                // если мы просто вызываем account() снова. 
+                // Поэтому проверяем: если ab_token нет - ставим текущий.
+                
+                // Простая проверка:
                 if (url.indexOf('ab_token=') === -1) {
-                    url = Lampa.Utils.addUrlComponent(url, 'ab_token=' + encodeURIComponent('мар.31'));
+                     url = Lampa.Utils.addUrlComponent(url, 'ab_token=' + encodeURIComponent(AB_TOKENS[current_ab_token_index]));
+                } else {
+                    // Если токен есть, но мы его сменили (ротация), надо бы заменить.
+                    // Регуляркой заменяем значение ab_token
+                    url = url.replace(/ab_token=([^&]+)/, 'ab_token=' + encodeURIComponent(AB_TOKENS[current_ab_token_index]));
                 }
+
             } else {
                 // Стандартная логика Skaz
                 if (url.indexOf('account_email=') === -1) {
@@ -211,7 +266,7 @@
 
             // url может прийти с прокси — нормализуем
             url = self.normalizeUrl(url);
-            url = self.account(url);
+            url = self.account(url); // Тут подставится текущий токен
 
             // 1) сначала через прокси (иначе часто CORS)
             var proxied = self.proxify(url);
@@ -221,26 +276,38 @@
             network.native(proxied, function (str) {
                 onOk && onOk(str);
             }, function () {
-                // 2) сменим прокси и попробуем ещё раз
+                // ОШИБКА 1: меняем прокси, зеркало и ТОКЕН
                 rotateProxy();
+                rotateToken(); // <-- смена токена
+                
+                // Пересобираем URL с новым токеном
+                url = self.account(url); 
                 proxied = self.proxify(url);
 
                 network.native(proxied, function (str2) {
                     onOk && onOk(str2);
                 }, function () {
-                    // 3) сменим зеркало и попробуем
+                    // ОШИБКА 2: еще раз меняем всё
                     rotateMirror();
+                    rotateToken(); // <-- смена токена
 
-                    // если url был на старом зеркале — заменим префикс
+                    // Если url был на старом домене — заменим префикс
                     var fixed = url;
                     
                     if (connection_source === 'ab2024') {
-                        // Замена домена lamX на новый из ротации
-                         fixed = fixed.replace(/^https:\/\/lam[^/]+\.akter-black\.com\//, current_mirror_ab);
+                        // Определяем, к какой группе относился запрос, чтобы подставить правильное зеркало из ротации
+                        // Проверяем по вхождению текущего url или просто берем getHost() т.к. mirror уже ротирован
+                        // Самый надежный способ - заново построить начало ссылки
+                        var host = getHost(active_source_name); 
+                        // Удаляем старый хост из ссылки (регулярка ищет протокол+домен)
+                        fixed = fixed.replace(/^https?:\/\/[^\/]+\//, host);
                     } else {
-                        // Замена домена onlineX на новый из ротации
+                        // Skaz replacement
                         fixed = fixed.replace(/^http:\/\/online[^/]+\.skaz\.tv\//, SETTINGS.current_mirror);
                     }
+                    
+                    // Обновляем токен в ссылке fixed
+                    fixed = self.account(fixed);
 
                     rotateProxy();
                     proxied = self.proxify(fixed);
@@ -269,7 +336,9 @@
                         if (b.index === 0) connection_source = 'skaz';
                         else connection_source = 'ab2024';
                         
-                        // При переключении сбрасываем и ротируем зеркала, чтобы обновить current_mirror_ab
+                        // Сброс токена на первый при смене источника
+                        current_ab_token_index = 0;
+                        
                         rotateMirror();
 
                         // Полный сброс и перезагрузка
@@ -424,10 +493,11 @@
         var plugin = this;
 
         function buildBaseSourceUrl() {
+            var host = getHost(active_source_name);
             if (current_postid) {
-                return getHost() + 'lite/' + active_source_name + '?postid=' + encodeURIComponent(current_postid);
+                return host + 'lite/' + active_source_name + '?postid=' + encodeURIComponent(current_postid);
             }
-            return getHost() + 'lite/' + active_source_name;
+            return host + 'lite/' + active_source_name;
         }
 
         function loadByUrl(url) {
@@ -490,6 +560,7 @@
                 if (j && (j.accsdb || j.msg)) {
                     rotateProxy();
                     rotateMirror();
+                    rotateToken();
                     return self.empty('Ошибка ответа сервера');
                 }
             } catch (e) {}
@@ -751,8 +822,11 @@
                 }
             }, function () {
                 Lampa.Loading.stop();
+                
+                // Ретрай с ротацией токена при ошибке плеера
                 rotateProxy();
-                Lampa.Noty.show('Ошибка сети при запросе видео');
+                rotateToken();
+                Lampa.Noty.show('Ошибка сети при запросе видео. Попробуйте еще раз.');
             });
         };
 
@@ -812,7 +886,8 @@
                 cb && cb();
                 return;
             }
-            var url = getHost() + 'externalids?id=' + encodeURIComponent(object.movie.id || '');
+            var host = getHost(active_source_name);
+            var url = host + 'externalids?id=' + encodeURIComponent(object.movie.id || '');
             url = self.account(url);
             network.timeout(15000);
             network.silent(url, function (json) {
@@ -837,7 +912,8 @@
 
         this.loadBalansers = function () {
             var self = this;
-            var url = self.requestParams(getHost() + 'lite/events?life=true');
+            var host = getHost(active_source_name);
+            var url = self.requestParams(host + 'lite/events?life=true');
             url = self.account(url);
             network.timeout(15000);
 
@@ -863,7 +939,10 @@
                 var name = (item.balanser || item.name || '').toLowerCase();
                 if (!name) return;
                 if (!ALLOWED_BALANSERS[name]) return;
-                var url = item.url || (getHost() + 'lite/' + name);
+                
+                var host = getHost(name);
+                var url = item.url || (host + 'lite/' + name);
+                
                 sources[name] = { name: item.name || name, url: plugin.normalizeUrl(url) };
                 source_items.push({
                     title: sources[name].name,
@@ -877,7 +956,10 @@
                     var name = (item.balanser || item.name || '').toLowerCase();
                     if (!name) return;
                     if (!ALLOWED_BALANSERS[name]) return;
-                    var url = getHost() + 'lite/' + name;
+                    
+                    var host = getHost(name);
+                    var url = host + 'lite/' + name;
+                    
                     sources[name] = { name: item.name || name, url: plugin.normalizeUrl(url) };
                     source_items.push({
                         title: sources[name].name,
