@@ -801,7 +801,19 @@
                     return;
                 }
                 if (response && response.url) {
-                    var final_url = self.normalizeUrl(response.url);
+                    // ИСПРАВЛЕНИЕ: Обрезаем ссылку, если сервер вернул двойную ("url or url")
+                    var fixed_url = (response.url + '').split(' or ')[0];
+                    var final_url = self.normalizeUrl(fixed_url);
+                    
+                    // ИСПРАВЛЕНИЕ: То же самое для массива качеств
+                    if (response.quality) {
+                         for (var k in response.quality) {
+                             if (response.quality.hasOwnProperty(k)) {
+                                 response.quality[k] = (response.quality[k] + '').split(' or ')[0];
+                             }
+                         }
+                    }
+
                     var video_data = {
                         title: response.title || data.title || 'Видео',
                         url: final_url,
