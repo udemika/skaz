@@ -45,6 +45,10 @@
             'http://online6.skaz.tv/'
         ];
 
+        // === ТОКЕНЫ AB2024 ===
+        var AB_TOKENS = ['мар.31', 'аааа', 'сентябрь', 'июнь99'];
+        var current_ab_token_index = 0;
+
         var SETTINGS = {
             email: 'aklama@mail.ru',
             uid: 'guest',
@@ -78,6 +82,12 @@
         function rotateProxy() {
             SETTINGS.current_proxy = PROXIES[Math.floor(Math.random() * PROXIES.length)];
             log('Switched proxy to:', SETTINGS.current_proxy);
+        }
+
+        function rotateToken() {
+            current_ab_token_index++;
+            if (current_ab_token_index >= AB_TOKENS.length) current_ab_token_index = 0;
+            log('Switched AB token to:', AB_TOKENS[current_ab_token_index]);
         }
 
         function rotateMirror() {
@@ -142,8 +152,14 @@
                 if (url.indexOf('uid=') === -1) {
                     url = Lampa.Utils.addUrlComponent(url, 'uid=4ezu837o');
                 }
+                
+                // Добавляем или обновляем токен
+                var token = AB_TOKENS[current_ab_token_index];
                 if (url.indexOf('ab_token=') === -1) {
-                    url = Lampa.Utils.addUrlComponent(url, 'ab_token=' + encodeURIComponent('мар.31'));
+                    url = Lampa.Utils.addUrlComponent(url, 'ab_token=' + encodeURIComponent(token));
+                } else {
+                    // Если токен уже есть (например, при повторном запросе), заменяем его на актуальный
+                    url = url.replace(/ab_token=([^&]+)/, 'ab_token=' + encodeURIComponent(token));
                 }
             } else {
                 // Стандартная логика Skaz
@@ -206,21 +222,26 @@
             network.native(proxied, function (str) {
                 onOk && onOk(str);
             }, function () {
-                // 2) сменим прокси и попробуем ещё раз
+                // 2) сменим прокси и ТОКЕН, попробуем ещё раз
                 rotateProxy();
+                rotateToken(); // <-- Смена токена при ошибке
+                
+                url = self.account(url); // Обновляем URL с новым токеном
                 proxied = self.proxify(url);
 
                 network.native(proxied, function (str2) {
                     onOk && onOk(str2);
                 }, function () {
-                    // 3) сменим зеркало и попробуем
+                    // 3) сменим зеркало, прокси и ТОКЕН
                     rotateMirror();
+                    rotateToken(); // <-- Смена токена при ошибке
 
                     // если url был на старом зеркале — заменим префикс
                     var fixed = url;
                     // грубо: если url начинается с http://onlineX.skaz.tv/ — заменим на текущий
                     fixed = fixed.replace(/^http:\/\/online[^/]+\.skaz\.tv\//, SETTINGS.current_mirror);
-                    // Для ab2024 это правило замены не сработает, что корректно (там нет ротации зеркал)
+                    
+                    fixed = self.account(fixed); // Обновляем токен в новой ссылке
 
                     rotateProxy();
                     proxied = self.proxify(fixed);
@@ -248,6 +269,9 @@
                         // Переключение источника (сервера)
                         if (b.index === 0) connection_source = 'skaz';
                         else connection_source = 'ab2024';
+                        
+                        // Сброс индекса токенов при смене источника
+                        current_ab_token_index = 0;
 
                         // Полный сброс и перезагрузка
                         current_postid = null;
@@ -467,6 +491,7 @@
                 if (j && (j.accsdb || j.msg)) {
                     rotateProxy();
                     rotateMirror();
+                    rotateToken();
                     return self.empty('Ошибка ответа сервера');
                 }
             } catch (e) {}
@@ -729,6 +754,7 @@
             }, function () {
                 Lampa.Loading.stop();
                 rotateProxy();
+                rotateToken(); // <-- Смена токена при ошибке плеера
                 Lampa.Noty.show('Ошибка сети при запросе видео');
             });
         };
