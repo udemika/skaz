@@ -39,28 +39,18 @@
             'https://apn2.akter-black.com/'
         ];
 
-        var MIRRORS_SKAZ = [
+        var MIRRORS = [
             'http://online4.skaz.tv/',
             'http://online5.skaz.tv/',
             'http://online6.skaz.tv/'
         ];
 
-        // Новые зеркала для ab2024
-        var MIRRORS_AB = [
-            'https://lam5.akter-black.com/',
-            'https://lam7.akter-black.com/',
-            'https://lam9.akter-black.com/',
-            'https://lam10.akter-black.com/'
-        ];
-
         var SETTINGS = {
             email: 'aklama@mail.ru',
             uid: 'guest',
-            current_mirror: MIRRORS_SKAZ[0],
+            current_mirror: MIRRORS[0],
             current_proxy: PROXIES[0]
         };
-        
-        var current_mirror_ab = MIRRORS_AB[0];
 
         // ===== Только нужные балансеры (whitelist) =====
         var DEFAULT_BALANSERS = [
@@ -91,14 +81,13 @@
         }
 
         function rotateMirror() {
-            SETTINGS.current_mirror = MIRRORS_SKAZ[Math.floor(Math.random() * MIRRORS_SKAZ.length)];
-            current_mirror_ab = MIRRORS_AB[Math.floor(Math.random() * MIRRORS_AB.length)];
-            log('Switched mirror to:', SETTINGS.current_mirror, current_mirror_ab);
+            SETTINGS.current_mirror = MIRRORS[Math.floor(Math.random() * MIRRORS.length)];
+            log('Switched mirror to:', SETTINGS.current_mirror);
         }
         
         // Получение текущего базового хоста в зависимости от выбора
         function getHost() {
-            return connection_source === 'ab2024' ? current_mirror_ab : SETTINGS.current_mirror;
+            return connection_source === 'ab2024' ? 'https://ab2024.ru/' : SETTINGS.current_mirror;
         }
 
         // ========= URL HELPERS =========
@@ -127,10 +116,6 @@
         this.proxify = function (url) {
             url = this.normalizeUrl(url);
             if (!url) return '';
-            
-            // Если выбран источник ab2024 - НЕ используем стандартные прокси, идем напрямую на lamX
-            if (connection_source === 'ab2024') return url;
-
             if (url.indexOf('http') !== 0) return url;
 
             // прямые потоки не проксируем
@@ -233,14 +218,9 @@
 
                     // если url был на старом зеркале — заменим префикс
                     var fixed = url;
-                    
-                    if (connection_source === 'ab2024') {
-                        // Замена домена lamX на новый из ротации
-                         fixed = fixed.replace(/^https:\/\/lam[^/]+\.akter-black\.com\//, current_mirror_ab);
-                    } else {
-                        // Замена домена onlineX на новый из ротации
-                        fixed = fixed.replace(/^http:\/\/online[^/]+\.skaz\.tv\//, SETTINGS.current_mirror);
-                    }
+                    // грубо: если url начинается с http://onlineX.skaz.tv/ — заменим на текущий
+                    fixed = fixed.replace(/^http:\/\/online[^/]+\.skaz\.tv\//, SETTINGS.current_mirror);
+                    // Для ab2024 это правило замены не сработает, что корректно (там нет ротации зеркал)
 
                     rotateProxy();
                     proxied = self.proxify(fixed);
@@ -268,9 +248,6 @@
                         // Переключение источника (сервера)
                         if (b.index === 0) connection_source = 'skaz';
                         else connection_source = 'ab2024';
-                        
-                        // При переключении сбрасываем и ротируем зеркала, чтобы обновить current_mirror_ab
-                        rotateMirror();
 
                         // Полный сброс и перезагрузка
                         current_postid = null;
