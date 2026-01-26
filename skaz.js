@@ -51,7 +51,7 @@
             'https://lam5.akter-black.com/',
             'https://lam9.akter-black.com/'
         ];
-        // Filmix, Kinopub, RHSprem (Alloha убрали отсюда, у него свой адрес)
+        // Filmix, Kinopub, RHSprem, Alloha (Вернули Alloha сюда, т.к. ab2024 отдает битые ссылки)
         var AB_POOL_2 = [
             'https://lam7.akter-black.com/',
             'https://lam10.akter-black.com/'
@@ -132,13 +132,10 @@
                     return current_ab_mirror_vcdn;
                 } else if (bName === 'rezka') {
                     return current_ab_mirror_rezka;
-                } else if (bName === 'alloha') {
-                    // Alloha теперь идет строго на ab2024.ru
-                    return 'https://ab2024.ru/'; 
-                } else if (bName === 'filmix' || bName === 'kinopub' || bName === 'rhsprem') {
+                } else if (bName === 'filmix' || bName === 'alloha' || bName === 'kinopub' || bName === 'rhsprem') {
+                    // Alloha используем через lam7/lam10, так надежнее
                     return current_ab_mirror_main;
                 } else {
-                    // Для служебных запросов используем пул main
                     return current_ab_mirror_main; 
                 }
             } else {
@@ -203,11 +200,9 @@
                     url = Lampa.Utils.addUrlComponent(url, 'uid=4ezu837o');
                 }
                 
-                // Простая проверка:
                 if (url.indexOf('ab_token=') === -1) {
                      url = Lampa.Utils.addUrlComponent(url, 'ab_token=' + encodeURIComponent(AB_TOKENS[current_ab_token_index]));
                 } else {
-                    // Если токен есть, но мы его сменили (ротация), заменяем
                     url = url.replace(/ab_token=([^&]+)/, 'ab_token=' + encodeURIComponent(AB_TOKENS[current_ab_token_index]));
                 }
 
@@ -262,7 +257,7 @@
 
             // url может прийти с прокси — нормализуем
             url = self.normalizeUrl(url);
-            url = self.account(url); // Тут подставится текущий токен
+            url = self.account(url); 
 
             // 1) сначала через прокси (иначе часто CORS)
             var proxied = self.proxify(url);
@@ -274,9 +269,8 @@
             }, function () {
                 // ОШИБКА 1: меняем прокси, зеркало и ТОКЕН
                 rotateProxy();
-                rotateToken(); // <-- смена токена
+                rotateToken(); 
                 
-                // Пересобираем URL с новым токеном
                 url = self.account(url); 
                 proxied = self.proxify(url);
 
@@ -285,22 +279,17 @@
                 }, function () {
                     // ОШИБКА 2: еще раз меняем всё
                     rotateMirror();
-                    rotateToken(); // <-- смена токена
+                    rotateToken(); 
 
-                    // Если url был на старом домене — заменим префикс
                     var fixed = url;
                     
                     if (connection_source === 'ab2024') {
-                        // Определяем, к какой группе относился запрос
                         var host = getHost(active_source_name); 
-                        // Удаляем старый хост из ссылки (регулярка ищет протокол+домен)
                         fixed = fixed.replace(/^https?:\/\/[^\/]+\//, host);
                     } else {
-                        // Skaz replacement
                         fixed = fixed.replace(/^http:\/\/online[^/]+\.skaz\.tv\//, SETTINGS.current_mirror);
                     }
                     
-                    // Обновляем токен в ссылке fixed
                     fixed = self.account(fixed);
 
                     rotateProxy();
@@ -330,12 +319,9 @@
                         if (b.index === 0) connection_source = 'skaz';
                         else connection_source = 'ab2024';
                         
-                        // Сброс токена на первый при смене источника
                         current_ab_token_index = 0;
-                        
                         rotateMirror();
 
-                        // Полный сброс и перезагрузка
                         current_postid = null;
                         current_source = '';
                         current_season = null;
@@ -343,7 +329,6 @@
                         filter_find.season = [];
                         filter_find.voice = [];
 
-                        // Перезагружаем контент с новым хостом
                         var base = buildBaseSourceUrl();
                         var url = plugin.requestParams(base);
                         current_source = plugin.normalizeUrl(url);
@@ -357,7 +342,6 @@
                             active_source_name = picked.source;
                             Lampa.Storage.set('skaz_last_balanser', active_source_name);
 
-                            // полный сброс при смене источника
                             current_postid = null;
                             current_source = '';
                             current_season = null;
@@ -365,7 +349,6 @@
                             filter_find.season = [];
                             filter_find.voice = [];
                             
-                            // Загружаем без s=
                             var base = buildBaseSourceUrl();
                             var url = plugin.requestParams(base);
                             current_source = plugin.normalizeUrl(url);
@@ -413,7 +396,7 @@
         this.updateFilterMenu = function() {
             var select = [];
             
-            // 0. Выбор подключения (Источники)
+            // 0. Выбор подключения
             select.push({
                 title: 'Источники',
                 subtitle: connection_source === 'ab2024' ? 'https://ab2024.ru' : 'http://online.skaz.tv',
@@ -424,7 +407,7 @@
                 stype: 'connection'
             });
 
-            // 1. Источник (Балансер)
+            // 1. Балансер
             if (source_items.length > 0) {
                 var srcIdx = 0;
                 for(var i=0; i<source_items.length; i++) {
@@ -805,7 +788,6 @@
                     var fixed_url = (response.url + '').split(' or ')[0];
                     var final_url = self.normalizeUrl(fixed_url);
                     
-                    // ИСПРАВЛЕНИЕ: То же самое для массива качеств
                     if (response.quality) {
                          for (var k in response.quality) {
                              if (response.quality.hasOwnProperty(k)) {
