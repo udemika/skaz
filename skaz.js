@@ -51,7 +51,7 @@
             'https://lam5.akter-black.com/',
             'https://lam9.akter-black.com/'
         ];
-        // Filmix, Kinopub, RHSprem, Alloha (Вернули Alloha сюда, т.к. ab2024 отдает битые ссылки)
+        // Filmix, Kinopub, RHSprem
         var AB_POOL_2 = [
             'https://lam7.akter-black.com/',
             'https://lam10.akter-black.com/'
@@ -132,8 +132,10 @@
                     return current_ab_mirror_vcdn;
                 } else if (bName === 'rezka') {
                     return current_ab_mirror_rezka;
-                } else if (bName === 'filmix' || bName === 'alloha' || bName === 'kinopub' || bName === 'rhsprem') {
-                    // Alloha используем через lam7/lam10, так надежнее
+                } else if (bName === 'alloha') {
+                    // Alloha остается на ab2024.ru, как и просили
+                    return 'https://ab2024.ru/'; 
+                } else if (bName === 'filmix' || bName === 'kinopub' || bName === 'rhsprem') {
                     return current_ab_mirror_main;
                 } else {
                     return current_ab_mirror_main; 
@@ -791,6 +793,7 @@
                     if (response.quality) {
                          for (var k in response.quality) {
                              if (response.quality.hasOwnProperty(k)) {
+                                 // То же самое для всех качеств
                                  response.quality[k] = (response.quality[k] + '').split(' or ')[0];
                              }
                          }
