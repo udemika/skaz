@@ -51,7 +51,7 @@
             'https://lam5.akter-black.com/',
             'https://lam9.akter-black.com/'
         ];
-        // Filmix, Alloha, Kinopub, RHSprem
+        // Filmix, Kinopub, RHSprem (Alloha убрали отсюда, у него свой адрес)
         var AB_POOL_2 = [
             'https://lam7.akter-black.com/',
             'https://lam10.akter-black.com/'
@@ -118,7 +118,7 @@
             // Ротация AB2024 (внутри групп)
             current_ab_mirror_vcdn = AB_POOL_1[Math.floor(Math.random() * AB_POOL_1.length)];
             current_ab_mirror_main = AB_POOL_2[Math.floor(Math.random() * AB_POOL_2.length)];
-            current_ab_mirror_rezka = AB_POOL_3[Math.floor(Math.random() * AB_POOL_3.length)]; // тут всего один, но для логики оставим
+            current_ab_mirror_rezka = AB_POOL_3[Math.floor(Math.random() * AB_POOL_3.length)]; 
             
             log('Mirrors rotated');
         }
@@ -132,10 +132,13 @@
                     return current_ab_mirror_vcdn;
                 } else if (bName === 'rezka') {
                     return current_ab_mirror_rezka;
-                } else if (bName === 'filmix' || bName === 'alloha' || bName === 'kinopub' || bName === 'rhsprem') {
+                } else if (bName === 'alloha') {
+                    // Alloha теперь идет строго на ab2024.ru
+                    return 'https://ab2024.ru/'; 
+                } else if (bName === 'filmix' || bName === 'kinopub' || bName === 'rhsprem') {
                     return current_ab_mirror_main;
                 } else {
-                    // Для служебных запросов (loadBalansers, getIds) используем пул main (lam7/lam10)
+                    // Для служебных запросов используем пул main
                     return current_ab_mirror_main; 
                 }
             } else {
@@ -178,7 +181,7 @@
             // прямые потоки не проксируем
             if (url.indexOf('.mp4') > -1 || url.indexOf('.m3u8') > -1) return url;
 
-            // ИСКЛЮЧЕНИЕ: Запросы к API Alloha идут без прокси (для старого режима)
+            // ИСКЛЮЧЕНИЕ: Запросы к API Alloha идут без прокси
             if (url.indexOf('/lite/alloha/video') !== -1) return url;
 
             return SETTINGS.current_proxy + url;
@@ -200,18 +203,11 @@
                     url = Lampa.Utils.addUrlComponent(url, 'uid=4ezu837o');
                 }
                 
-                // Удаляем старый токен если есть, чтобы подставить актуальный (для ротации)
-                // Но Lampa.Utils.addUrlComponent просто добавляет. 
-                // Если токен уже вшит в URL, ротация не сработает корректно при ретрае, 
-                // если мы просто вызываем account() снова. 
-                // Поэтому проверяем: если ab_token нет - ставим текущий.
-                
                 // Простая проверка:
                 if (url.indexOf('ab_token=') === -1) {
                      url = Lampa.Utils.addUrlComponent(url, 'ab_token=' + encodeURIComponent(AB_TOKENS[current_ab_token_index]));
                 } else {
-                    // Если токен есть, но мы его сменили (ротация), надо бы заменить.
-                    // Регуляркой заменяем значение ab_token
+                    // Если токен есть, но мы его сменили (ротация), заменяем
                     url = url.replace(/ab_token=([^&]+)/, 'ab_token=' + encodeURIComponent(AB_TOKENS[current_ab_token_index]));
                 }
 
@@ -295,9 +291,7 @@
                     var fixed = url;
                     
                     if (connection_source === 'ab2024') {
-                        // Определяем, к какой группе относился запрос, чтобы подставить правильное зеркало из ротации
-                        // Проверяем по вхождению текущего url или просто берем getHost() т.к. mirror уже ротирован
-                        // Самый надежный способ - заново построить начало ссылки
+                        // Определяем, к какой группе относился запрос
                         var host = getHost(active_source_name); 
                         // Удаляем старый хост из ссылки (регулярка ищет протокол+домен)
                         fixed = fixed.replace(/^https?:\/\/[^\/]+\//, host);
