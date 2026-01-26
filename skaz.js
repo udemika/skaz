@@ -266,9 +266,8 @@
             filter.onSelect = function(type, a, b) {
                 if (type == 'filter') {
                     if (a.stype == 'connection') {
-                        // Переключение источника (сервера)
-                        if (b.index === 0) connection_source = 'skaz';
-                        else connection_source = 'ab2024';
+                        // Исправленное переключение источника
+                        connection_source = b.index === 0 ? 'skaz' : 'ab2024';
                         
                         // Сброс индекса токенов при смене источника
                         current_ab_token_index = 0;
@@ -282,10 +281,7 @@
                         filter_find.voice = [];
 
                         // Перезагружаем контент с новым хостом
-                        var base = buildBaseSourceUrl();
-                        var url = plugin.requestParams(base);
-                        current_source = plugin.normalizeUrl(url);
-                        loadByUrl(url);
+                        _this.loadBalansers();
 
                         setTimeout(Lampa.Select.close, 10);
                         
@@ -356,8 +352,8 @@
                 title: 'Источники',
                 subtitle: connection_source === 'ab2024' ? 'https://ab2024.ru' : 'http://online.skaz.tv',
                 items: [
-                    { title: 'http://online.skaz.tv', selected: connection_source === 'skaz' },
-                    { title: 'https://ab2024.ru', selected: connection_source === 'ab2024' }
+                    { title: 'http://online.skaz.tv', selected: connection_source === 'skaz', index: 0 },
+                    { title: 'https://ab2024.ru', selected: connection_source === 'ab2024', index: 1 }
                 ],
                 stype: 'connection'
             });
