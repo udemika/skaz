@@ -21,6 +21,9 @@
         var current_postid = null;   // postid выбранного совпадения (если был)
         var current_season = 1;
         var current_voice_idx = 0;
+        
+        // Переменная для выбора источника подключения
+        var connection_source = 'skaz'; // 'skaz' или 'ab2024'
 
         var filter_find = {
             season: [],
@@ -39,13 +42,11 @@
         var MIRRORS = [
             'http://online4.skaz.tv/',
             'http://online5.skaz.tv/',
-            'http://online6.skaz.tv/',
-            'http://online3.skaz.tv/',
-            'http://online7.skaz.tv/'
+            'http://online6.skaz.tv/'
         ];
 
         var SETTINGS = {
-            email: 'akzama@mail.ru',
+            email: 'aklama@mail.ru',
             uid: 'guest',
             current_mirror: MIRRORS[0],
             current_proxy: PROXIES[0]
@@ -56,7 +57,6 @@
             { name: 'VideoCDN', balanser: 'videocdn' },
             { name: 'Filmix', balanser: 'filmix' },
             { name: 'kinopub', balanser: 'kinopub' },
-            { name: 'kinobase', balanser: 'kinobase' },
             { name: 'Alloha', balanser: 'alloha' },
             { name: 'RHS Premium', balanser: 'rhsprem' },
             { name: 'Rezka', balanser: 'rezka' }
@@ -66,7 +66,6 @@
             videocdn: true,
             filmix: true,
             kinopub: true,
-            kinobase: true,
             alloha: true,
             rhsprem: true,
             rezka: true
@@ -84,6 +83,11 @@
         function rotateMirror() {
             SETTINGS.current_mirror = MIRRORS[Math.floor(Math.random() * MIRRORS.length)];
             log('Switched mirror to:', SETTINGS.current_mirror);
+        }
+        
+        // Получение текущего базового хоста в зависимости от выбора
+        function getHost() {
+            return connection_source === 'ab2024' ? 'https://ab2024.ru/' : SETTINGS.current_mirror;
         }
 
         // ========= URL HELPERS =========
@@ -133,11 +137,22 @@
 
             url = clean;
 
-            if (url.indexOf('account_email=') === -1) {
-                url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(SETTINGS.email));
-            }
-            if (url.indexOf('uid=') === -1) {
-                url = Lampa.Utils.addUrlComponent(url, 'uid=' + encodeURIComponent(SETTINGS.uid));
+            if (connection_source === 'ab2024') {
+                // Логика авторизации для ab2024
+                if (url.indexOf('uid=') === -1) {
+                    url = Lampa.Utils.addUrlComponent(url, 'uid=4ezu837o');
+                }
+                if (url.indexOf('ab_token=') === -1) {
+                    url = Lampa.Utils.addUrlComponent(url, 'ab_token=' + encodeURIComponent('мар.31'));
+                }
+            } else {
+                // Стандартная логика Skaz
+                if (url.indexOf('account_email=') === -1) {
+                    url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(SETTINGS.email));
+                }
+                if (url.indexOf('uid=') === -1) {
+                    url = Lampa.Utils.addUrlComponent(url, 'uid=' + encodeURIComponent(SETTINGS.uid));
+                }
             }
 
             return url;
@@ -175,52 +190,48 @@
             }
         }
 
-        // ========= HTML REQUEST (ИСПРАВЛЕН ПЕРЕБОР СЕРВЕРОВ) =========
+        // ========= HTML REQUEST (ВСЕГДА text) =========
         this.requestHtml = function (url, onOk, onFail) {
             var self = this;
-            
-            // Получаем "чистый" путь без домена, чтобы подставлять разные зеркала
-            var relative_path = self.normalizeUrl(url);
-            
-            // Удаляем возможные домены из начала строки
-            MIRRORS.forEach(function(m) {
-                 if(relative_path.indexOf(m) === 0) relative_path = relative_path.replace(m, '');
-            });
-            // Страховка для старых ссылок
-            relative_path = relative_path.replace(/^http:\/\/online[^/]+\.skaz\.tv\//, '');
-            
-            function tryMirror(index) {
-                if (index >= MIRRORS.length) {
-                    onFail && onFail();
-                    return;
-                }
 
-                SETTINGS.current_mirror = MIRRORS[index];
-                
-                // Формируем полный URL с текущим зеркалом
-                var target_url = SETTINGS.current_mirror + relative_path;
-                target_url = self.account(target_url);
-                
-                // Меняем прокси для надежности
+            // url может прийти с прокси — нормализуем
+            url = self.normalizeUrl(url);
+            url = self.account(url);
+
+            // 1) сначала через прокси (иначе часто CORS)
+            var proxied = self.proxify(url);
+
+            network.timeout(15000);
+
+            network.native(proxied, function (str) {
+                onOk && onOk(str);
+            }, function () {
+                // 2) сменим прокси и попробуем ещё раз
                 rotateProxy();
-                var proxied = self.proxify(target_url);
+                proxied = self.proxify(url);
 
-                network.timeout(10000);
-
-                network.native(proxied, function (str) {
-                    // Если ответ пустой или содержит ошибку авторизации - пробуем следующее зеркало
-                    if (!str || str.indexOf('Авторизация не удалась') !== -1) {
-                         tryMirror(index + 1);
-                    } else {
-                        onOk && onOk(str);
-                    }
+                network.native(proxied, function (str2) {
+                    onOk && onOk(str2);
                 }, function () {
-                    // Ошибка сети - пробуем следующее зеркало
-                    tryMirror(index + 1);
-                }, false, { dataType: 'text' });
-            }
+                    // 3) сменим зеркало и попробуем
+                    rotateMirror();
 
-            tryMirror(0);
+                    // если url был на старом зеркале — заменим префикс
+                    var fixed = url;
+                    // грубо: если url начинается с http://onlineX.skaz.tv/ — заменим на текущий
+                    fixed = fixed.replace(/^http:\/\/online[^/]+\.skaz\.tv\//, SETTINGS.current_mirror);
+                    // Для ab2024 это правило замены не сработает, что корректно (там нет ротации зеркал)
+
+                    rotateProxy();
+                    proxied = self.proxify(fixed);
+
+                    network.native(proxied, function (str3) {
+                        onOk && onOk(str3);
+                    }, function () {
+                        onFail && onFail();
+                    }, false, { dataType: 'text' });
+                }, false, { dataType: 'text' });
+            }, false, { dataType: 'text' });
         };
 
         // ========= UI: INIT & FILTER =========
@@ -233,7 +244,28 @@
 
             filter.onSelect = function(type, a, b) {
                 if (type == 'filter') {
-                    if (a.stype == 'source') {
+                    if (a.stype == 'connection') {
+                        // Переключение источника (сервера)
+                        if (b.index === 0) connection_source = 'skaz';
+                        else connection_source = 'ab2024';
+
+                        // Полный сброс и перезагрузка
+                        current_postid = null;
+                        current_source = '';
+                        current_season = null;
+                        current_voice_idx = 0;
+                        filter_find.season = [];
+                        filter_find.voice = [];
+
+                        // Перезагружаем контент с новым хостом
+                        var base = buildBaseSourceUrl();
+                        var url = plugin.requestParams(base);
+                        current_source = plugin.normalizeUrl(url);
+                        loadByUrl(url);
+
+                        setTimeout(Lampa.Select.close, 10);
+                        
+                    } else if (a.stype == 'source') {
                         var picked = source_items[b.index];
                         if (picked) {
                             active_source_name = picked.source;
@@ -295,7 +327,18 @@
         this.updateFilterMenu = function() {
             var select = [];
             
-            // 1. Источник
+            // 0. Выбор подключения (Источники)
+            select.push({
+                title: 'Источники',
+                subtitle: connection_source === 'ab2024' ? 'https://ab2024.ru' : 'http://online.skaz.tv',
+                items: [
+                    { title: 'http://online.skaz.tv', selected: connection_source === 'skaz' },
+                    { title: 'https://ab2024.ru', selected: connection_source === 'ab2024' }
+                ],
+                stype: 'connection'
+            });
+
+            // 1. Источник (Балансер)
             if (source_items.length > 0) {
                 var srcIdx = 0;
                 for(var i=0; i<source_items.length; i++) {
@@ -306,7 +349,7 @@
                 }
                 
                 select.push({
-                    title: 'Источник',
+                    title: 'Балансер',
                     subtitle: source_items[srcIdx].title,
                     items: source_items.map(function(s, i) {
                         return { title: s.title, selected: i === srcIdx, index: i };
@@ -359,9 +402,9 @@
 
         function buildBaseSourceUrl() {
             if (current_postid) {
-                return SETTINGS.current_mirror + 'lite/' + active_source_name + '?postid=' + encodeURIComponent(current_postid);
+                return getHost() + 'lite/' + active_source_name + '?postid=' + encodeURIComponent(current_postid);
             }
-            return SETTINGS.current_mirror + 'lite/' + active_source_name;
+            return getHost() + 'lite/' + active_source_name;
         }
 
         function loadByUrl(url) {
@@ -746,7 +789,7 @@
                 cb && cb();
                 return;
             }
-            var url = SETTINGS.current_mirror + 'externalids?id=' + encodeURIComponent(object.movie.id || '');
+            var url = getHost() + 'externalids?id=' + encodeURIComponent(object.movie.id || '');
             url = self.account(url);
             network.timeout(15000);
             network.silent(url, function (json) {
@@ -771,31 +814,22 @@
 
         this.loadBalansers = function () {
             var self = this;
-            
-            function tryMirror(index) {
-                if (index >= MIRRORS.length) {
-                    self.buildSourceFilter(DEFAULT_BALANSERS);
-                    return;
-                }
+            var url = self.requestParams(getHost() + 'lite/events?life=true');
+            url = self.account(url);
+            network.timeout(15000);
 
-                SETTINGS.current_mirror = MIRRORS[index];
-                
-                var url = self.requestParams(SETTINGS.current_mirror + 'lite/events?life=true');
-                url = self.account(url);
-                
-                network.timeout(15000);
-                
+            network.silent(url, function (json) {
+                if (json && json.online && json.online.length) self.buildSourceFilter(json.online);
+                else self.buildSourceFilter(DEFAULT_BALANSERS);
+            }, function () {
                 rotateProxy();
-
                 network.silent(self.proxify(url), function (json) {
                     if (json && json.online && json.online.length) self.buildSourceFilter(json.online);
-                    else tryMirror(index + 1);
+                    else self.buildSourceFilter(DEFAULT_BALANSERS);
                 }, function () {
-                    tryMirror(index + 1);
+                    self.buildSourceFilter(DEFAULT_BALANSERS);
                 });
-            }
-            
-            tryMirror(0);
+            });
         };
 
         this.buildSourceFilter = function (online_list) {
@@ -806,7 +840,7 @@
                 var name = (item.balanser || item.name || '').toLowerCase();
                 if (!name) return;
                 if (!ALLOWED_BALANSERS[name]) return;
-                var url = item.url || (SETTINGS.current_mirror + 'lite/' + name);
+                var url = item.url || (getHost() + 'lite/' + name);
                 sources[name] = { name: item.name || name, url: plugin.normalizeUrl(url) };
                 source_items.push({
                     title: sources[name].name,
@@ -820,7 +854,7 @@
                     var name = (item.balanser || item.name || '').toLowerCase();
                     if (!name) return;
                     if (!ALLOWED_BALANSERS[name]) return;
-                    var url = SETTINGS.current_mirror + 'lite/' + name;
+                    var url = getHost() + 'lite/' + name;
                     sources[name] = { name: item.name || name, url: plugin.normalizeUrl(url) };
                     source_items.push({
                         title: sources[name].name,
