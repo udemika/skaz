@@ -16,27 +16,34 @@
         var source_items = [];
         var active_source_name = '';
 
-        // ВАЖНО: хранить без прокси, без account-параметров
-        var current_source = '';     // текущая страница lite (html)
-        var current_postid = null;   // postid выбранного совпадения (если был)
+        var current_source = '';     
+        var current_postid = null;   
         var current_season = 1;
         var current_voice_idx = 0;
         
-        // Переменная для выбора источника подключения
-        var connection_source = 'skaz'; // 'skaz' или 'ab2024'
+        // Порядок: 1. AB2024, 2. Showy, 3. Skaz
+        // По умолчанию ставим AB2024
+        var connection_source = 'ab2024'; 
 
         var filter_find = {
             season: [],
             voice: []
         };
 
-        // ===== Mirrors (Для перебора) =====
-        var MIRRORS = [
+        // ===== Mirrors SKAZ =====
+        var MIRRORS_SKAZ = [
             'http://online3.skaz.tv/',
             'http://online7.skaz.tv/',
             'http://online4.skaz.tv/',
             'http://online5.skaz.tv/',
             'http://online6.skaz.tv/'
+        ];
+
+        // ===== Mirrors SHOWY (Новый источник) =====
+        var MIRRORS_SHOWY = [
+            'http://showypro.com/',
+            'http://showy.pro/',
+            'http://smotretk.com/'
         ];
 
         // === ТОКЕНЫ AB2024 ===
@@ -46,13 +53,15 @@
         var SETTINGS = {
             email: 'aklama@mail.ru',
             uid: 'guest',
-            current_mirror: MIRRORS[0]
+            current_skaz_mirror: MIRRORS_SKAZ[0],
+            current_showy_mirror: MIRRORS_SHOWY[0]
         };
 
-        // ===== Только нужные балансеры (whitelist) =====
+        // ===== Whitelist + FXAPI =====
         var DEFAULT_BALANSERS = [
             { name: 'VideoCDN', balanser: 'videocdn' },
             { name: 'Filmix', balanser: 'filmix' },
+            { name: 'FXApi', balanser: 'fxapi' }, // Добавлено
             { name: 'kinopub', balanser: 'kinopub' },
             { name: 'Alloha', balanser: 'alloha' },
             { name: 'RHS Premium', balanser: 'rhsprem' },
@@ -64,6 +73,7 @@
         var ALLOWED_BALANSERS = {
             videocdn: true,
             filmix: true,
+            fxapi: true, // Добавлено
             kinopub: true,
             alloha: true,
             rhsprem: true,
@@ -76,68 +86,72 @@
             try { console.log('[SkazLite]', msg, data || ''); } catch (e) {}
         }
 
-        // Убрали rotateProxy, так как прокси больше нет
-
         function rotateToken() {
             current_ab_token_index++;
             if (current_ab_token_index >= AB_TOKENS.length) current_ab_token_index = 0;
             log('Switched AB token to:', AB_TOKENS[current_ab_token_index]);
         }
 
-        // Перебор зеркал по кругу
-        function rotateMirror() {
-            var currentIdx = MIRRORS.indexOf(SETTINGS.current_mirror);
-            var nextIdx = (currentIdx + 1) % MIRRORS.length;
-            SETTINGS.current_mirror = MIRRORS[nextIdx];
-            log('Switched mirror to:', SETTINGS.current_mirror);
+        function rotateSkazMirror() {
+            var idx = MIRRORS_SKAZ.indexOf(SETTINGS.current_skaz_mirror);
+            SETTINGS.current_skaz_mirror = MIRRORS_SKAZ[(idx + 1) % MIRRORS_SKAZ.length];
+            log('Switched Skaz mirror to:', SETTINGS.current_skaz_mirror);
+        }
+
+        function rotateShowyMirror() {
+            var idx = MIRRORS_SHOWY.indexOf(SETTINGS.current_showy_mirror);
+            SETTINGS.current_showy_mirror = MIRRORS_SHOWY[(idx + 1) % MIRRORS_SHOWY.length];
+            log('Switched Showy mirror to:', SETTINGS.current_showy_mirror);
         }
         
-        // Получение текущего базового хоста в зависимости от выбора
+        // Получение хоста в зависимости от источника
         function getHost() {
-            return connection_source === 'ab2024' ? 'https://ab2024.ru/' : SETTINGS.current_mirror;
+            if (connection_source === 'ab2024') return 'https://ab2024.ru/';
+            if (connection_source === 'showy') return SETTINGS.current_showy_mirror;
+            return SETTINGS.current_skaz_mirror;
         }
 
         // ========= URL HELPERS =========
         this.clearProxy = function (url) {
-            if (!url) return '';
-            return (url + '').trim();
+            return (url || '').toString().trim();
         };
 
         this.normalizeUrl = function (url) {
-            return this.clearProxy((url || '').toString().trim());
+            return this.clearProxy(url);
         };
 
-        // ТЕПЕРЬ PROXIFY ПРОСТО ВОЗВРАЩАЕТ URL БЕЗ ИЗМЕНЕНИЙ
         this.proxify = function (url) {
             return this.normalizeUrl(url);
         };
 
         this.account = function (url) {
             if (!url) return url;
-
             var clean = this.normalizeUrl(url);
 
-            // к потокам не добавляем параметры
             if (clean.indexOf('.mp4') > -1 || clean.indexOf('.m3u8') > -1) return clean;
 
             url = clean;
 
             if (connection_source === 'ab2024') {
-                // Логика авторизации для ab2024
-                if (url.indexOf('uid=') === -1) {
-                    url = Lampa.Utils.addUrlComponent(url, 'uid=4ezu837o');
-                }
-                
-                // Добавляем или обновляем токен
+                if (url.indexOf('uid=') === -1) url = Lampa.Utils.addUrlComponent(url, 'uid=4ezu837o');
                 var token = AB_TOKENS[current_ab_token_index];
                 if (url.indexOf('ab_token=') === -1) {
                     url = Lampa.Utils.addUrlComponent(url, 'ab_token=' + encodeURIComponent(token));
                 } else {
-                    // Если токен уже есть (например, при повторном запросе), заменяем его на актуальный
                     url = url.replace(/ab_token=([^&]+)/, 'ab_token=' + encodeURIComponent(token));
                 }
-            } else {
-                // Стандартная логика Skaz
+            } 
+            else if (connection_source === 'showy') {
+                // Авторизация для Showy
+                if (url.indexOf('uid=') === -1) {
+                    url = Lampa.Utils.addUrlComponent(url, 'uid=i8nqb9vw');
+                }
+                if (url.indexOf('showy_token=') === -1) {
+                    url = Lampa.Utils.addUrlComponent(url, 'showy_token=f8377057-90eb-4d76-93c9-7605952a096l');
+                }
+            }
+            else {
+                // Skaz
                 if (url.indexOf('account_email=') === -1) {
                     url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(SETTINGS.email));
                 }
@@ -164,7 +178,6 @@
             if (extra_params) {
                 for (var key in extra_params) {
                     if (!extra_params.hasOwnProperty(key)) continue;
-                    if (key === 'url' || key === 'method' || key === 'title') continue;
                     query.push(encodeURIComponent(key) + '=' + encodeURIComponent(extra_params[key]));
                 }
             }
@@ -176,61 +189,55 @@
             try {
                 var m = (url || '').match(new RegExp('[?&]' + name + '=([^&]+)'));
                 return m ? decodeURIComponent(m[1]) : null;
-            } catch (e) {
-                return null;
-            }
+            } catch (e) { return null; }
         }
 
-        // ========= HTML REQUEST С ПЕРЕБОРОМ СЕРВЕРОВ (LOOP) =========
+        // ========= HTML REQUEST (LOOP) =========
         this.requestHtml = function (url, onOk, onFail) {
             var self = this;
-            
-            // Счетчик попыток для текущего вызова
             var attempts = 0;
-            // Максимум попыток равен количеству зеркал (для skaz) или токенов (для ab2024)
-            var max_attempts = connection_source === 'ab2024' ? AB_TOKENS.length : MIRRORS.length;
+            
+            // Определяем макс попыток
+            var max_attempts = 1;
+            if (connection_source === 'ab2024') max_attempts = AB_TOKENS.length;
+            else if (connection_source === 'showy') max_attempts = MIRRORS_SHOWY.length;
+            else max_attempts = MIRRORS_SKAZ.length;
 
-            function tryRequest(current_url) {
-                // Нормализуем и добавляем аккаунт/токен
-                current_url = self.normalizeUrl(current_url);
-                current_url = self.account(current_url);
+            function tryRequest(base_url) {
+                // Сначала добавляем аккаунт/токен к чистому (или обновленному зеркалом) URL
+                var current_url = self.account(base_url);
 
-                // Прямой запрос без прокси
                 network.timeout(15000);
-                
                 log('Requesting:', current_url);
 
                 network.native(current_url, function (str) {
-                    // Успех
                     onOk && onOk(str);
                 }, function () {
-                    // Ошибка
                     attempts++;
                     if (attempts < max_attempts) {
-                        // Меняем параметры для следующей попытки
                         if (connection_source === 'ab2024') {
                             rotateToken();
-                            // Токен обновится внутри self.account() при следующем вызове, 
-                            // но нам нужно передать тот же URL
-                            tryRequest(url);
-                        } else {
-                            // Skaz: меняем зеркало
-                            rotateMirror();
-                            // Нам нужно взять исходный URL и заменить в нем домен на новый текущий
-                            // Регулярка ищет http://onlineX.skaz.tv/ и меняет на SETTINGS.current_mirror
-                            var new_url = current_url.replace(/http:\/\/online.*?\.skaz\.tv\//, SETTINGS.current_mirror);
-                            // Если замена не произошла (ссылка была относительной или другой), используем getHost() + путь? 
-                            // Но обычно url здесь полный.
+                            tryRequest(url); // Пробуем тот же URL, но account() добавит новый токен
+                        } 
+                        else if (connection_source === 'showy') {
+                            rotateShowyMirror();
+                            // Меняем домен на новый текущий
+                            var new_url = base_url.replace(/http:\/\/(showypro\.com|showy\.pro|smotretk\.com)\//, SETTINGS.current_showy_mirror);
+                            tryRequest(new_url);
+                        }
+                        else {
+                            // Skaz
+                            rotateSkazMirror();
+                            var new_url = base_url.replace(/http:\/\/online.*?\.skaz\.tv\//, SETTINGS.current_skaz_mirror);
                             tryRequest(new_url);
                         }
                     } else {
-                        // Все попытки исчерпаны
                         onFail && onFail();
                     }
                 }, false, { dataType: 'text' });
             }
 
-            // Запускаем цикл
+            // Запускаем
             tryRequest(url);
         };
 
@@ -238,20 +245,19 @@
         this.initialize = function() {
             var _this = this;
 
-            filter.onBack = function() {
-                _this.start();
-            };
+            filter.onBack = function() { _this.start(); };
 
             filter.onSelect = function(type, a, b) {
                 if (type == 'filter') {
                     if (a.stype == 'connection') {
-                        // Исправленное переключение источника
-                        connection_source = b.index === 0 ? 'skaz' : 'ab2024';
+                        // 1. ab2024 (idx 0), 2. showy (idx 1), 3. skaz (idx 2)
+                        if (b.index === 0) connection_source = 'ab2024';
+                        else if (b.index === 1) connection_source = 'showy';
+                        else connection_source = 'skaz';
                         
-                        // Сброс индекса токенов при смене источника
                         current_ab_token_index = 0;
 
-                        // Полный сброс и перезагрузка
+                        // Сброс
                         current_postid = null;
                         current_source = '';
                         current_season = null;
@@ -259,9 +265,7 @@
                         filter_find.season = [];
                         filter_find.voice = [];
 
-                        // Перезагружаем контент с новым хостом
                         _this.loadBalansers();
-
                         setTimeout(Lampa.Select.close, 10);
                         
                     } else if (a.stype == 'source') {
@@ -270,7 +274,6 @@
                             active_source_name = picked.source;
                             Lampa.Storage.set('skaz_last_balanser', active_source_name);
 
-                            // полный сброс при смене источника
                             current_postid = null;
                             current_source = '';
                             current_season = null;
@@ -278,7 +281,6 @@
                             filter_find.season = [];
                             filter_find.voice = [];
                             
-                            // Загружаем без s=
                             var base = buildBaseSourceUrl();
                             var url = plugin.requestParams(base);
                             current_source = plugin.normalizeUrl(url);
@@ -289,10 +291,8 @@
                         if (it) {
                             filter_find.season.forEach(function (s) { s.selected = false; });
                             it.selected = true;
-
                             current_season = it.season || (b.index + 1);
                             current_voice_idx = 0;
-
                             if (it.url) loadByUrl(it.url);
                             else loadSeason(current_season);
                         }
@@ -301,9 +301,7 @@
                         if (it) {
                             filter_find.voice.forEach(function (v) { v.selected = false; });
                             it.selected = true;
-
                             current_voice_idx = b.index;
-
                             if (it.url) loadByUrl(it.url);
                             else if (typeof it.t === 'number') loadVoice(it.t);
                         }
@@ -317,28 +315,29 @@
             files.appendHead(filter.render());
             scroll.minus(files.render().find('.explorer__files-head'));
             
-            // Инициализация стартового зеркала (без прокси)
-            // rotateProxy(); - УБРАНО
-            // rotateMirror(); - Оставим как есть или просто используем дефолтное
-            
             this.start();
         };
 
         this.updateFilterMenu = function() {
             var select = [];
             
-            // 0. Выбор подключения (Источники)
+            // Источники: 1. AB2024, 2. Showy, 3. Skaz
+            var current_sub = '';
+            if (connection_source === 'ab2024') current_sub = 'https://ab2024.ru';
+            else if (connection_source === 'showy') current_sub = SETTINGS.current_showy_mirror;
+            else current_sub = SETTINGS.current_skaz_mirror;
+
             select.push({
                 title: 'Источники',
-                subtitle: connection_source === 'ab2024' ? 'https://ab2024.ru' : SETTINGS.current_mirror, // Показываем текущее зеркало
+                subtitle: current_sub,
                 items: [
-                    { title: 'Skaz TV', selected: connection_source === 'skaz', index: 0 },
-                    { title: 'AB2024', selected: connection_source === 'ab2024', index: 1 }
+                    { title: 'AB2024', selected: connection_source === 'ab2024', index: 0 },
+                    { title: 'Showy', selected: connection_source === 'showy', index: 1 },
+                    { title: 'Skaz TV', selected: connection_source === 'skaz', index: 2 }
                 ],
                 stype: 'connection'
             });
 
-            // 1. Источник (Балансер)
             if (source_items.length > 0) {
                 var srcIdx = 0;
                 for(var i=0; i<source_items.length; i++) {
@@ -347,7 +346,6 @@
                         break;
                     }
                 }
-                
                 select.push({
                     title: 'Балансер',
                     subtitle: source_items[srcIdx].title,
@@ -358,16 +356,11 @@
                 });
             }
 
-            // 2. Сезон
             if (filter_find.season.length > 0) {
                 var seasonIdx = 0;
                 for(var i=0; i<filter_find.season.length; i++) {
-                    if (filter_find.season[i].selected) {
-                        seasonIdx = i;
-                        break;
-                    }
+                    if (filter_find.season[i].selected) { seasonIdx = i; break; }
                 }
-                
                 select.push({
                     title: 'Сезон',
                     subtitle: filter_find.season[seasonIdx].title,
@@ -378,11 +371,9 @@
                 });
             }
 
-            // 3. Озвучка
             if (filter_find.voice.length > 0) {
                 var voiceIdx = current_voice_idx !== null ? current_voice_idx : 0;
                 if (voiceIdx >= filter_find.voice.length) voiceIdx = 0;
-
                 select.push({
                     title: 'Озвучка',
                     subtitle: filter_find.voice[voiceIdx].title,
@@ -446,9 +437,7 @@
             var d = el.data('json');
             if (d) return d;
             var s = el.attr('data-json');
-            if (s) {
-                try { return JSON.parse(s); } catch (e) {}
-            }
+            if (s) { try { return JSON.parse(s); } catch (e) {} }
             return null;
         }
 
@@ -461,19 +450,18 @@
 
         this.parse = function (str) {
             var self = this;
-
             try {
                 var j = JSON.parse(str);
                 if (j && (j.accsdb || j.msg)) {
-                    // rotateProxy(); // Убрано
-                    rotateMirror();
-                    rotateToken();
-                    return self.empty('Ошибка ответа сервера');
+                    if (connection_source === 'ab2024') rotateToken();
+                    else if (connection_source === 'showy') rotateShowyMirror();
+                    else rotateSkazMirror();
+                    
+                    return self.empty('Ошибка ответа сервера (авторизация)');
                 }
             } catch (e) {}
 
             var html = $(str);
-
             self.parseFilters(html);
 
             var content = html.find('.videos__item');
@@ -483,10 +471,8 @@
                 content.each(function () {
                     var el = $(this);
                     var data = getJsonFromEl(el);
-
                     if (!data) return;
 
-                    // method: link
                     if (data.method === 'link' && data.url) {
                         list_items.push({
                             type: 'link',
@@ -497,11 +483,9 @@
                         return;
                     }
 
-                    // method: play/call
                     if ((data.method === 'play' || data.method === 'call') && (data.url || data.stream)) {
                         if (data.url) data.url = self.normalizeUrl(data.url);
                         if (data.stream) data.stream = self.normalizeUrl(data.stream);
-
                         list_items.push({
                             type: 'play',
                             title: guessTitle(el, data),
@@ -512,43 +496,28 @@
                 });
             }
 
-            // ЕСЛИ фильтр сезонов пуст, но в списке есть папки-сезоны (type: link)
             if (filter_find.season.length === 0 && list_items.length > 0) {
                  var links = list_items.filter(function(i){ return i.type === 'link'; });
                  if (links.length > 0) {
                      filter_find.season = links.map(function(item) {
                          var m = item.title.match(/(\d+)/);
                          var sn = m ? parseInt(m[1], 10) : null;
-                         return {
-                             title: item.title,
-                             season: sn,
-                             url: item.url,
-                             selected: false
-                         };
+                         return { title: item.title, season: sn, url: item.url, selected: false };
                      });
-                     // Авто-выбор текущего сезона, если известен
                      if (current_season) {
-                         filter_find.season.forEach(function(s){
-                             if(s.season == current_season) s.selected = true;
-                         });
+                         filter_find.season.forEach(function(s){ if(s.season == current_season) s.selected = true; });
                      }
                      self.updateFilterMenu(); 
                  }
             }
 
             scroll.clear();
-
-            if (list_items.length) {
-                self.displayList(list_items);
-            } else {
-                self.empty('Пусто. Попробуйте другой источник/сезон/озвучку.');
-            }
-
+            if (list_items.length) self.displayList(list_items);
+            else self.empty('Пусто. Попробуйте другой источник/сезон/озвучку.');
             Lampa.Controller.enable('content');
         };
 
         this.parseFilters = function (html) {
-            // == СЕЗОНЫ ==
             var found_seasons = [];
             var seasons = html.find('.videos__season, .selector[data-type="season"]');
 
@@ -556,11 +525,9 @@
                 seasons.each(function () {
                     var el = $(this);
                     var data = getJsonFromEl(el) || {};
-
                     var txt = el.text().trim();
                     var m = txt.match(/(\d+)/);
                     var sn = m ? parseInt(m[1], 10) : null;
-
                     found_seasons.push({
                         title: txt || (sn ? ('Сезон ' + sn) : 'Сезон'),
                         season: sn,
@@ -570,27 +537,20 @@
                 });
             }
 
-            // Логика сохранения
             if (found_seasons.length > 0) {
                 filter_find.season = found_seasons;
-                // Если ни один не выбран, выбираем первый
                 if (!filter_find.season.some(function (s) { return s.selected; })) {
                     filter_find.season[0].selected = true;
                 }
-                // Синхронизируем current_season
                 var sSel = null;
                 for (var i = 0; i < filter_find.season.length; i++) if (filter_find.season[i].selected) sSel = filter_find.season[i];
                 if (sSel && sSel.season) current_season = sSel.season;
             } else {
-                // Ничего не нашли в HTML
                 if (filter_find.season.length > 0) {
-                    filter_find.season.forEach(function(s) {
-                        s.selected = (s.season == current_season);
-                    });
+                    filter_find.season.forEach(function(s) { s.selected = (s.season == current_season); });
                 }
             }
 
-            // == ОЗВУЧКИ ==
             filter_find.voice = [];
             var voices = html.find('.videos__button, .selector[data-type="voice"]');
 
@@ -598,16 +558,13 @@
                 voices.each(function () {
                     var el = $(this);
                     var data = getJsonFromEl(el) || {};
-
                     var title = el.text().trim();
                     var url = data.url ? plugin.normalizeUrl(data.url) : null;
-
                     var tParam = null;
                     if (url) {
                         var mm = url.match(/[?&]t=(\d+)/);
                         if (mm) tParam = parseInt(mm[1], 10);
                     }
-
                     filter_find.voice.push({
                         title: title || 'Озвучка',
                         url: url,
@@ -619,109 +576,56 @@
                 if (filter_find.voice.length && !filter_find.voice.some(function (v) { return v.selected; })) {
                     filter_find.voice[0].selected = true;
                 }
-                
                 var vSel = null;
                 for (var i = 0; i < filter_find.voice.length; i++) if (filter_find.voice[i].selected) vSel = filter_find.voice[i];
                 if (vSel) current_voice_idx = filter_find.voice.indexOf(vSel);
             }
-
             this.updateFilterMenu();
         };
 
-        // ========= DISPLAY LIST =========
         this.displayList = function(items) {
             var _this = this;
-            
             items.forEach(function(element) {
                 var html = $('<div class="online-prestige selector">' +
-                    '<div class="online-prestige__body">' +
-                        '<div class="online-prestige__title">' + element.title + '</div>' +
-                    '</div>' +
-                '</div>');
-
+                    '<div class="online-prestige__body"><div class="online-prestige__title">' + element.title + '</div></div></div>');
                 html.on('hover:enter', function() {
-                    if (element.type === 'link') {
-                        goLink(element.url);
-                    } else if (element.type === 'play') {
-                        _this.play(element.data);
-                    }
+                    if (element.type === 'link') goLink(element.url);
+                    else if (element.type === 'play') _this.play(element.data);
                 });
-
-                html.on('hover:focus', function(e) {
-                    last_focus = e.target;
-                    scroll.update(e.target, true);
-                });
-
+                html.on('hover:focus', function(e) { last_focus = e.target; scroll.update(e.target, true); });
                 scroll.append(html);
             });
-            
             Lampa.Controller.enable('content');
         };
 
         // ========= PLAYER =========
         this.play = function (data) {
             var self = this;
-
             if (!data) return;
+            if (data.method === 'link' && data.url) { goLink(data.url); return; }
+            if (!data.url && !data.stream) { Lampa.Noty.show('Нет ссылки на видео'); return; }
 
-            // link НЕ проигрывать — это переход
-            if (data.method === 'link' && data.url) {
-                goLink(data.url);
-                return;
-            }
-
-            if (!data.url && !data.stream) {
-                Lampa.Noty.show('Нет ссылки на видео');
-                return;
-            }
-
-            log('Play method:', data.method);
-            log('Play URL:', data.url || data.stream);
-
-            // прямой mp4/m3u8
             if (data.method === 'play' && data.url && (data.url.indexOf('.mp4') > -1 || data.url.indexOf('.m3u8') > -1)) {
                 var clean = self.normalizeUrl(data.url);
-                var video_data = {
-                    title: data.title || 'Видео',
-                    url: clean,
-                    quality: data.quality || {},
-                    subtitles: data.subtitles || [],
-                    timeline: data.timeline || {}
-                };
+                var video_data = { title: data.title || 'Видео', url: clean };
                 Lampa.Player.play(video_data);
                 Lampa.Player.playlist([video_data]);
                 return;
             }
 
-            // call/api (JSON)
             var api_url = data.url || data.stream;
             api_url = self.account(api_url);
-            // api_url = self.proxify(api_url); // Proxify теперь просто возвращает url, но можно оставить для единообразия
-
+            
             Lampa.Loading.start(function () { Lampa.Loading.stop(); });
             network.timeout(15000);
 
-            // В плеере логика перебора сложнее, оставим простой ретрай с токеном/зеркалом?
-            // Сделаем простой вариант без цикла, или минимальный повтор.
             network.silent(api_url, function (response) {
                 Lampa.Loading.stop();
-                if (response && response.accsdb) {
-                    Lampa.Noty.show('Ошибка аккаунта.');
-                    return;
-                }
-                if (response && response.error) {
-                    Lampa.Noty.show('Ошибка: ' + response.error);
-                    return;
-                }
+                if (response && response.accsdb) { Lampa.Noty.show('Ошибка аккаунта.'); return; }
+                if (response && response.error) { Lampa.Noty.show('Ошибка: ' + response.error); return; }
                 if (response && response.url) {
                     var final_url = self.normalizeUrl(response.url);
-                    var video_data = {
-                        title: response.title || data.title || 'Видео',
-                        url: final_url,
-                        quality: response.quality || {},
-                        subtitles: response.subtitles || [],
-                        timeline: response.timeline || {}
-                    };
+                    var video_data = { title: response.title || data.title || 'Видео', url: final_url };
                     Lampa.Player.play(video_data);
                     Lampa.Player.playlist([video_data]);
                 } else {
@@ -729,112 +633,95 @@
                 }
             }, function () {
                 Lampa.Loading.stop();
-                // rotateProxy(); // Убрано
-                rotateToken(); // Попробуем сменить токен для следующего раза
+                if (connection_source === 'ab2024') rotateToken(); 
                 Lampa.Noty.show('Ошибка сети при запросе видео');
             });
         };
 
         // ========= LIFE CYCLE =========
-        this.create = function () {
-            this.initialize();
-            return this.render();
-        };
+        this.create = function () { this.initialize(); return this.render(); };
 
         this.start = function() {
             var _this = this;
             if (Lampa.Activity.active().activity !== _this.activity) return;
             
             Lampa.Controller.add('content', {
-                toggle: function() {
-                    Lampa.Controller.collectionSet(scroll.render(), files.render());
-                    Lampa.Controller.collectionFocus(last_focus || false, scroll.render());
-                },
-                left: function() {
-                    if (Navigator.canmove('left')) Navigator.move('left');
-                    else Lampa.Controller.toggle('menu');
-                },
-                right: function() {
-                    if (Navigator.canmove('right')) Navigator.move('right');
-                    else filter.show('Фильтр', 'filter');
-                },
-                up: function() {
-                    if (Navigator.canmove('up')) Navigator.move('up');
-                    else Lampa.Controller.toggle('head');
-                },
-                down: function() {
-                    Navigator.move('down');
-                },
-                back: function() {
-                    Lampa.Activity.backward();
-                }
+                toggle: function() { Lampa.Controller.collectionSet(scroll.render(), files.render()); Lampa.Controller.collectionFocus(last_focus || false, scroll.render()); },
+                left: function() { if (Navigator.canmove('left')) Navigator.move('left'); else Lampa.Controller.toggle('menu'); },
+                right: function() { if (Navigator.canmove('right')) Navigator.move('right'); else filter.show('Фильтр', 'filter'); },
+                up: function() { if (Navigator.canmove('up')) Navigator.move('up'); else Lampa.Controller.toggle('head'); },
+                down: function() { Navigator.move('down'); },
+                back: function() { Lampa.Activity.backward(); }
             });
-
             Lampa.Controller.toggle('content');
             
             if (!active_source_name && !scroll.render().find('.lampac-loading').length) {
                 scroll.clear();
                 scroll.body().append(Lampa.Template.get('lampac_content_loading'));
-                _this.getIds(function () {
-                    _this.loadBalansers();
-                });
+                _this.getIds(function () { _this.loadBalansers(); });
             }
         };
 
-        this.render = function () {
-            return files.render();
-        };
+        this.render = function () { return files.render(); };
 
         this.getIds = function (cb) {
             var self = this;
-            if (object.movie.kinopoisk_id || object.movie.imdb_id) {
-                cb && cb();
-                return;
-            }
+            if (object.movie.kinopoisk_id || object.movie.imdb_id) { cb && cb(); return; }
             var url = getHost() + 'externalids?id=' + encodeURIComponent(object.movie.id || '');
+            // Используем прямой вызов с account, но без рекурсии, так как это не критично
+            // Для надежности можно использовать ту же логику что в requestHtml, но оставим простым
             url = self.account(url);
             network.timeout(15000);
             
-            // Здесь тоже можно внедрить retry логику, но оставим простую для ids
             network.silent(url, function (json) {
                 try {
                     if (json && json.kinopoisk_id) object.movie.kinopoisk_id = json.kinopoisk_id;
                     if (json && json.imdb_id) object.movie.imdb_id = json.imdb_id;
                 } catch (e) {}
                 cb && cb();
-            }, function () {
-                // Если не вышло с основного зеркала - просто продолжим, 
-                // не блокируем загрузку, балансеры попробуют сами перебрать.
-                cb && cb();
-            });
+            }, function () { cb && cb(); });
         };
 
         this.loadBalansers = function () {
             var self = this;
             var url = self.requestParams(getHost() + 'lite/events?life=true');
-            url = self.account(url);
-            network.timeout(15000);
-
-            // Функция для загрузки балансеров с перебором
+            // Здесь НЕ вызываем self.account(url) сразу, чтобы не "запекать" токен в URL
+            
             var attempts = 0;
-            var max_attempts = MIRRORS.length;
+            // Определяем макс попыток
+            var max_attempts = 1;
+            if (connection_source === 'ab2024') max_attempts = AB_TOKENS.length;
+            else if (connection_source === 'showy') max_attempts = MIRRORS_SHOWY.length;
+            else max_attempts = MIRRORS_SKAZ.length;
 
-            function tryLoad(current_url) {
-                network.silent(current_url, function (json) {
+            function tryLoad(base_url) {
+                // Добавляем токен здесь, динамически
+                var final_url = self.account(base_url);
+                
+                network.timeout(15000);
+                network.silent(final_url, function (json) {
                     if (json && json.online && json.online.length) self.buildSourceFilter(json.online);
                     else self.buildSourceFilter(DEFAULT_BALANSERS);
                 }, function () {
                     attempts++;
-                    if (connection_source === 'skaz' && attempts < max_attempts) {
-                         rotateMirror();
-                         var new_url = current_url.replace(/http:\/\/online.*?\.skaz\.tv\//, SETTINGS.current_mirror);
-                         tryLoad(new_url);
+                    if (attempts < max_attempts) {
+                         if (connection_source === 'ab2024') {
+                             rotateToken();
+                             tryLoad(base_url); // Рекурсия с базовым URL, токен добавится заново
+                         } else if (connection_source === 'showy') {
+                             rotateShowyMirror();
+                             var new_url = base_url.replace(/http:\/\/(showypro\.com|showy\.pro|smotretk\.com)\//, SETTINGS.current_showy_mirror);
+                             tryLoad(new_url);
+                         } else {
+                             rotateSkazMirror();
+                             var new_url = base_url.replace(/http:\/\/online.*?\.skaz\.tv\//, SETTINGS.current_skaz_mirror);
+                             tryLoad(new_url);
+                         }
                     } else {
                          self.buildSourceFilter(DEFAULT_BALANSERS);
                     }
                 });
             }
-            
             tryLoad(url);
         };
 
@@ -883,20 +770,19 @@
                 source_items[j].selected = (source_items[j].source === active_source_name);
             }
 
-            // сброс
             current_postid = null;
             current_source = '';
-            current_season = null; // Сброс
+            current_season = null;
             current_voice_idx = 0;
             filter_find.season = [];
             filter_find.voice = [];
 
             this.updateFilterMenu();
             
-            // ВМЕСТО loadSeason(1) делаем запрос без параметров (без s=)
             var base = buildBaseSourceUrl();
-            var url = plugin.requestParams(base); // Параметры фильма добавятся, но s= нет
-            current_source = plugin.normalizeUrl(url);
+            var url = plugin.requestParams(base); 
+            // current_source не устанавливаем жестко, чтобы он мог обновляться при смене токена
+            // current_source = plugin.normalizeUrl(url); 
             loadByUrl(url);
         };
 
@@ -923,23 +809,13 @@
     function startPlugin() {
         if (window.plugin_skaz_lite_ready) return;
         window.plugin_skaz_lite_ready = true;
-
         Lampa.Component.add('skaz_lite', SkazLite);
-
         Lampa.Listener.follow('full', function (e) {
             if (e.type === 'complite') {
                 var btn = $('<div class="full-start__button selector view--online" data-subtitle="Skaz Lite"><span>SkazLite</span></div>');
-
                 btn.on('hover:enter', function () {
-                    Lampa.Activity.push({
-                        url: '',
-                        title: 'Skaz Lite',
-                        component: 'skaz_lite',
-                        movie: e.data.movie,
-                        page: 1
-                    });
+                    Lampa.Activity.push({ url: '', title: 'Skaz Lite', component: 'skaz_lite', movie: e.data.movie, page: 1 });
                 });
-
                 e.object.activity.render().find('.view--torrent').after(btn);
             }
         });
