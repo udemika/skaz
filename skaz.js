@@ -222,7 +222,8 @@
                         } 
                         else if (connection_source === 'showy') {
                             rotateShowyMirror();
-                            var new_url = base_url.replace(/http:\/\/(showypro\.com|showy\.pro|smotretk\.com)\//, SETTINGS.current_showy_mirror);
+                            // ИСПРАВЛЕНО: Добавлен (\/)? для обработки возможной склейки (отсутствия слэша)
+                            var new_url = base_url.replace(/http:\/\/(showypro\.com|showy\.pro|smotretk\.com)(\/)?/, SETTINGS.current_showy_mirror);
                             tryRequest(new_url);
                         }
                         else {
@@ -701,7 +702,8 @@
                              tryLoad(base_url); 
                          } else if (connection_source === 'showy') {
                              rotateShowyMirror();
-                             var new_url = base_url.replace(/http:\/\/(showypro\.com|showy\.pro|smotretk\.com)\//, SETTINGS.current_showy_mirror);
+                             // ИСПРАВЛЕНО: Добавлен (\/)? для обработки возможной склейки
+                             var new_url = base_url.replace(/http:\/\/(showypro\.com|showy\.pro|smotretk\.com)(\/)?/, SETTINGS.current_showy_mirror);
                              tryLoad(new_url);
                          } else {
                              rotateSkazMirror();
