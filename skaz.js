@@ -22,7 +22,6 @@
         var current_voice_idx = 0;
         
         // Порядок: 1. AB2024, 2. Showy, 3. Skaz
-        // По умолчанию ставим AB2024
         var connection_source = 'ab2024'; 
 
         var filter_find = {
@@ -39,7 +38,7 @@
             'http://online6.skaz.tv/'
         ];
 
-        // ===== Mirrors SHOWY (Новый источник) =====
+        // ===== Mirrors SHOWY (Обязательно со слэшем на конце) =====
         var MIRRORS_SHOWY = [
             'http://showypro.com/',
             'http://showy.pro/',
@@ -61,7 +60,7 @@
         var DEFAULT_BALANSERS = [
             { name: 'VideoCDN', balanser: 'videocdn' },
             { name: 'Filmix', balanser: 'filmix' },
-            { name: 'FXApi', balanser: 'fxapi' }, // Добавлено
+            { name: 'FXApi', balanser: 'fxapi' }, 
             { name: 'kinopub', balanser: 'kinopub' },
             { name: 'Alloha', balanser: 'alloha' },
             { name: 'RHS Premium', balanser: 'rhsprem' },
@@ -73,7 +72,7 @@
         var ALLOWED_BALANSERS = {
             videocdn: true,
             filmix: true,
-            fxapi: true, // Добавлено
+            fxapi: true, 
             kinopub: true,
             alloha: true,
             rhsprem: true,
@@ -104,11 +103,15 @@
             log('Switched Showy mirror to:', SETTINGS.current_showy_mirror);
         }
         
-        // Получение хоста в зависимости от источника
+        // Получение хоста в зависимости от источника (с защитой слэша)
         function getHost() {
-            if (connection_source === 'ab2024') return 'https://ab2024.ru/';
-            if (connection_source === 'showy') return SETTINGS.current_showy_mirror;
-            return SETTINGS.current_skaz_mirror;
+            var host = '';
+            if (connection_source === 'ab2024') host = 'https://ab2024.ru/';
+            else if (connection_source === 'showy') host = SETTINGS.current_showy_mirror;
+            else host = SETTINGS.current_skaz_mirror;
+            
+            // Гарантируем наличие слэша в конце
+            return (host && host.slice(-1) === '/') ? host : host + '/';
         }
 
         // ========= URL HELPERS =========
@@ -197,14 +200,12 @@
             var self = this;
             var attempts = 0;
             
-            // Определяем макс попыток
             var max_attempts = 1;
             if (connection_source === 'ab2024') max_attempts = AB_TOKENS.length;
             else if (connection_source === 'showy') max_attempts = MIRRORS_SHOWY.length;
             else max_attempts = MIRRORS_SKAZ.length;
 
             function tryRequest(base_url) {
-                // Сначала добавляем аккаунт/токен к чистому (или обновленному зеркалом) URL
                 var current_url = self.account(base_url);
 
                 network.timeout(15000);
@@ -217,16 +218,14 @@
                     if (attempts < max_attempts) {
                         if (connection_source === 'ab2024') {
                             rotateToken();
-                            tryRequest(url); // Пробуем тот же URL, но account() добавит новый токен
+                            tryRequest(url); 
                         } 
                         else if (connection_source === 'showy') {
                             rotateShowyMirror();
-                            // Меняем домен на новый текущий
                             var new_url = base_url.replace(/http:\/\/(showypro\.com|showy\.pro|smotretk\.com)\//, SETTINGS.current_showy_mirror);
                             tryRequest(new_url);
                         }
                         else {
-                            // Skaz
                             rotateSkazMirror();
                             var new_url = base_url.replace(/http:\/\/online.*?\.skaz\.tv\//, SETTINGS.current_skaz_mirror);
                             tryRequest(new_url);
@@ -237,7 +236,6 @@
                 }, false, { dataType: 'text' });
             }
 
-            // Запускаем
             tryRequest(url);
         };
 
@@ -250,14 +248,12 @@
             filter.onSelect = function(type, a, b) {
                 if (type == 'filter') {
                     if (a.stype == 'connection') {
-                        // 1. ab2024 (idx 0), 2. showy (idx 1), 3. skaz (idx 2)
                         if (b.index === 0) connection_source = 'ab2024';
                         else if (b.index === 1) connection_source = 'showy';
                         else connection_source = 'skaz';
                         
                         current_ab_token_index = 0;
 
-                        // Сброс
                         current_postid = null;
                         current_source = '';
                         current_season = null;
@@ -321,7 +317,6 @@
         this.updateFilterMenu = function() {
             var select = [];
             
-            // Источники: 1. AB2024, 2. Showy, 3. Skaz
             var current_sub = '';
             if (connection_source === 'ab2024') current_sub = 'https://ab2024.ru';
             else if (connection_source === 'showy') current_sub = SETTINGS.current_showy_mirror;
@@ -392,6 +387,7 @@
         var plugin = this;
 
         function buildBaseSourceUrl() {
+            // getHost() теперь гарантированно возвращает слэш на конце
             if (current_postid) {
                 return getHost() + 'lite/' + active_source_name + '?postid=' + encodeURIComponent(current_postid);
             }
@@ -668,8 +664,6 @@
             var self = this;
             if (object.movie.kinopoisk_id || object.movie.imdb_id) { cb && cb(); return; }
             var url = getHost() + 'externalids?id=' + encodeURIComponent(object.movie.id || '');
-            // Используем прямой вызов с account, но без рекурсии, так как это не критично
-            // Для надежности можно использовать ту же логику что в requestHtml, но оставим простым
             url = self.account(url);
             network.timeout(15000);
             
@@ -685,17 +679,14 @@
         this.loadBalansers = function () {
             var self = this;
             var url = self.requestParams(getHost() + 'lite/events?life=true');
-            // Здесь НЕ вызываем self.account(url) сразу, чтобы не "запекать" токен в URL
             
             var attempts = 0;
-            // Определяем макс попыток
             var max_attempts = 1;
             if (connection_source === 'ab2024') max_attempts = AB_TOKENS.length;
             else if (connection_source === 'showy') max_attempts = MIRRORS_SHOWY.length;
             else max_attempts = MIRRORS_SKAZ.length;
 
             function tryLoad(base_url) {
-                // Добавляем токен здесь, динамически
                 var final_url = self.account(base_url);
                 
                 network.timeout(15000);
@@ -707,7 +698,7 @@
                     if (attempts < max_attempts) {
                          if (connection_source === 'ab2024') {
                              rotateToken();
-                             tryLoad(base_url); // Рекурсия с базовым URL, токен добавится заново
+                             tryLoad(base_url); 
                          } else if (connection_source === 'showy') {
                              rotateShowyMirror();
                              var new_url = base_url.replace(/http:\/\/(showypro\.com|showy\.pro|smotretk\.com)\//, SETTINGS.current_showy_mirror);
@@ -781,8 +772,6 @@
             
             var base = buildBaseSourceUrl();
             var url = plugin.requestParams(base); 
-            // current_source не устанавливаем жестко, чтобы он мог обновляться при смене токена
-            // current_source = plugin.normalizeUrl(url); 
             loadByUrl(url);
         };
 
