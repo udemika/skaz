@@ -40,13 +40,15 @@
         ];
 
         var MIRRORS = [
+            'http://online3.skaz.tv/',
+            'http://online7.skaz.tv/',
             'http://online4.skaz.tv/',
             'http://online5.skaz.tv/',
             'http://online6.skaz.tv/'
         ];
 
         // === ТОКЕНЫ AB2024 ===
-        var AB_TOKENS = ['мар.31', 'аааа', 'сентябрь', 'июнь99'];
+        var AB_TOKENS = ['мар.31', 'TotalᴬᵂUK0PRIMETEAM', 'сентябрь', 'июнь99'];
         var current_ab_token_index = 0;
 
         var SETTINGS = {
@@ -63,6 +65,8 @@
             { name: 'kinopub', balanser: 'kinopub' },
             { name: 'Alloha', balanser: 'alloha' },
             { name: 'RHS Premium', balanser: 'rhsprem' },
+            { name: 'kinobase', balanser: 'kinobase' },
+            { name: 'vkmovie', balanser: 'vkmovie' },
             { name: 'Rezka', balanser: 'rezka' }
         ];
 
