@@ -76,6 +76,8 @@
             kinopub: true,
             alloha: true,
             rhsprem: true,
+            kinobase: true,
+            vkmovie: true,
             rezka: true
         };
 
