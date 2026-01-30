@@ -42,8 +42,8 @@
 
         // ===== Mirrors SHOWY (Новый источник) =====
         var MIRRORS_SHOWY = [
-            'http://showypro.com/',
             'http://showy.pro/',
+            'http://showypro.com/',
             'http://smotretk.com/'
         ];
 
