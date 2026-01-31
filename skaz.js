@@ -236,11 +236,9 @@
                             tryRequest(url);
                         } else if (connection_source === 'showy') {
                             rotateShowyMirror();
-                            // Замена домена для Showy (с учетом возможного отсутствия слэша при склейке)
                             var new_url = current_url.replace(/http:\/\/(showypro\.com|showy\.pro|smotretk\.com)(\/)?/, SETTINGS.current_showy_mirror);
                             tryRequest(new_url);
                         } else {
-                            // Skaz
                             rotateMirror();
                             var new_url = current_url.replace(/http:\/\/online.*?\.skaz\.tv\//, SETTINGS.current_mirror);
                             tryRequest(new_url);
@@ -732,11 +730,27 @@
                     return;
                 }
                 if (response && response.url) {
-                    var final_url = self.normalizeUrl(response.url);
+                    // ИСПРАВЛЕНИЕ: Обработка ' or ' в ссылках
+                    var raw_url = response.url;
+                    if (raw_url.indexOf(' or ') > -1) {
+                        raw_url = raw_url.split(' or ')[0];
+                    }
+                    var final_url = self.normalizeUrl(raw_url);
+                    
+                    var quality = response.quality || {};
+                    for (var key in quality) {
+                         if (quality.hasOwnProperty(key)) {
+                             var q_url = quality[key];
+                             if (q_url && q_url.indexOf(' or ') > -1) {
+                                 quality[key] = q_url.split(' or ')[0];
+                             }
+                         }
+                    }
+
                     var video_data = {
                         title: response.title || data.title || 'Видео',
                         url: final_url,
-                        quality: response.quality || {},
+                        quality: quality,
                         subtitles: response.subtitles || [],
                         timeline: response.timeline || {}
                     };
