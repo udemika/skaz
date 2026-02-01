@@ -47,8 +47,8 @@
         var current_ab_token_index = 0;
 
         var SETTINGS = {
-            email: 'aklama@mail.ru',
-            uid: 'guest',
+            email: 'aksarus@gmail.com',
+            uid: '123',
             current_mirror: MIRRORS_SKAZ[0],
             current_showy_mirror: MIRRORS_SHOWY[0]
         };
