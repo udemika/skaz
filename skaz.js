@@ -48,7 +48,7 @@
 
         var SETTINGS = {
             email: 'aksarus@gmail.com',
-            uid: '123',
+            uid: '111',
             current_mirror: MIRRORS_SKAZ[0],
             current_showy_mirror: MIRRORS_SHOWY[0]
         };
